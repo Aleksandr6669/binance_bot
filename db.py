@@ -282,13 +282,13 @@ def get_user_by_username(username):
     conn = get_db_connection()
     user = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
     conn.close()
-    return user
+    return dict(user) if user else None
 
 def get_user_by_id(user_id):
     conn = get_db_connection()
     user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
     conn.close()
-    return user
+    return dict(user) if user else None
 
 def update_user_api_keys(user_id, gemini_api_key, binance_api_key, binance_api_secret, telegram_chat_id, telegram_bot_token):
     conn = get_db_connection()
@@ -326,7 +326,7 @@ def get_user_settings(user_id):
     conn = get_db_connection()
     settings = conn.execute("SELECT * FROM settings WHERE user_id = ?", (user_id,)).fetchone()
     conn.close()
-    return settings
+    return dict(settings) if settings else None
 
 def save_user_settings(user_id, trading_pair, timeframe, order_size_usdt, bot_enabled, trading_mode, market_type="SPOT", futures_leverage=10, min_probability_threshold=0.88, invert_signal=0, bot_started_at=None, use_limit_orders=1, use_trailing_stop=1, use_ai_limit_price=0, trailing_activation_pct=0.5, trailing_step_pct=0.2, use_ai_exit=0, use_ai_trailing=0):
     conn = get_db_connection()
@@ -660,3 +660,25 @@ def get_filtered_analysis_logs(user_id, pair=None, start_date=None, end_date=Non
     rows = conn.execute(query, params).fetchall()
     conn.close()
     return rows
+
+def get_daily_pnl(user_id, trading_mode="DEMO"):
+    conn = get_db_connection()
+    row = conn.execute(
+        """SELECT SUM(pnl) AS total_pnl 
+           FROM orders 
+           WHERE user_id = ? 
+             AND trading_mode = ? 
+             AND status IN ('CLOSED_TP', 'CLOSED_SL', 'CLOSED_MANUAL')
+             AND closed_at >= datetime('now', '-1 day')""",
+        (user_id, trading_mode)
+    ).fetchone()
+    
+    user_row = conn.execute("SELECT demo_balance FROM users WHERE id = ?", (user_id,)).fetchone()
+    conn.close()
+    
+    pnl_val = float(row["total_pnl"] or 0.0) if row else 0.0
+    balance = float(user_row["demo_balance"] or 10000.0) if user_row else 10000.0
+    pct = (pnl_val / balance * 100) if balance > 0 else 0.0
+    
+    return {"pnl": pnl_val, "pct": pct}
+
