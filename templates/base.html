@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}AI Crypto Bot{% endblock %} - Premium Trading Interface</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <!-- FontAwesome for Premium Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        :root {
+            --bg-color: #030407;
+            --surface-color: rgba(13, 17, 23, 0.5);
+            --surface-border: rgba(255, 255, 255, 0.05);
+            --surface-color-solid: #0d1117;
+            --text-primary: #f0f3f6;
+            --text-secondary: #8b9bb4;
+            --accent-gold: #ffb703;
+            --accent-cyan: #06b6d4;
+            --accent-green: #10b981;
+            --accent-red: #f43f5e;
+            --shadow-primary: rgba(255, 183, 3, 0.15);
+            --transition-speed: 0.25s;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Inter', sans-serif;
+            scrollbar-width: thin;
+            scrollbar-color: var(--surface-border) transparent;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            background-image: 
+                radial-gradient(circle at 15% 15%, rgba(6, 182, 212, 0.08) 0%, transparent 45%),
+                radial-gradient(circle at 85% 85%, rgba(255, 183, 3, 0.06) 0%, transparent 45%),
+                radial-gradient(circle at 50% 50%, rgba(16, 185, 129, 0.03) 0%, transparent 60%);
+            background-attachment: fixed;
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
+        }
+
+        /* Scrollbar styles */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: var(--surface-border);
+            border-radius: 99px;
+            border: 2px solid var(--bg-color);
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--accent-gold);
+        }
+
+        /* Glassmorphism Panel Utility */
+        .glass-panel {
+            background: var(--surface-color);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border: 1px solid var(--surface-border);
+            border-radius: 16px;
+            box-shadow: 0 10px 40px 0 rgba(0, 0, 0, 0.4);
+            transition: all var(--transition-speed) cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .glass-panel:hover {
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+
+        /* Navbar */
+        nav {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.25rem 5%;
+            border-bottom: 1px solid var(--surface-border);
+            background: rgba(3, 4, 7, 0.7);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            text-decoration: none;
+            color: var(--text-primary);
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.45rem;
+            font-weight: 800;
+            letter-spacing: -0.75px;
+        }
+
+        .logo i {
+            color: var(--accent-gold);
+            filter: drop-shadow(0 0 10px rgba(255, 183, 3, 0.5));
+            animation: pulse 2s infinite alternate;
+        }
+
+        .logo span {
+            background: linear-gradient(135deg, var(--accent-gold) 0%, var(--accent-cyan) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 2.25rem;
+            align-items: center;
+            list-style: none;
+        }
+
+        .nav-links a {
+            text-decoration: none;
+            color: var(--text-secondary);
+            font-weight: 500;
+            font-size: 0.9rem;
+            transition: all var(--transition-speed);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .nav-links a:hover, .nav-links a.active {
+            color: var(--text-primary);
+            text-shadow: 0 0 12px rgba(255, 255, 255, 0.1);
+        }
+
+        .nav-links a.active {
+            border-bottom: 2px solid var(--accent-gold);
+            padding-bottom: 0.25rem;
+            color: var(--accent-gold);
+        }
+
+        .btn {
+            padding: 0.65rem 1.4rem;
+            border-radius: 10px;
+            font-weight: 600;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all var(--transition-speed) cubic-bezier(0.16, 1, 0.3, 1);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            text-decoration: none;
+            border: none;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent-gold) 0%, #e09f00 100%);
+            color: #030407;
+            box-shadow: 0 4px 14px rgba(255, 183, 3, 0.25);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px) scale(1.02);
+            box-shadow: 0 6px 20px rgba(255, 183, 3, 0.45);
+        }
+
+        .btn-primary:active {
+            transform: translateY(0) scale(0.98);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.04);
+            color: var(--text-primary);
+            border: 1px solid var(--surface-border);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.15);
+            transform: translateY(-2px);
+        }
+
+        .btn-secondary:active {
+            transform: translateY(0);
+        }
+
+        .btn-danger {
+            background: rgba(244, 63, 94, 0.12);
+            color: var(--accent-red);
+            border: 1px solid rgba(244, 63, 94, 0.25);
+        }
+
+        .btn-danger:hover {
+            background: rgba(244, 63, 94, 0.22);
+            border-color: rgba(244, 63, 94, 0.4);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(244, 63, 94, 0.15);
+        }
+
+        .btn-danger:active {
+            transform: translateY(0);
+        }
+
+        .btn-sm {
+            padding: 0.35rem 0.75rem;
+            font-size: 0.75rem;
+            border-radius: 6px;
+        }
+
+        .btn-block {
+            display: flex;
+            width: 100%;
+        }
+
+        /* Container & Main Layout */
+        main {
+            flex: 1;
+            padding: 2.25rem 5%;
+            max-width: 1600px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        /* Toast notifications */
+        .flashes {
+            list-style: none;
+            margin-bottom: 2rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .flash-msg {
+            padding: 0.9rem 1.25rem;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-weight: 500;
+            font-size: 0.85rem;
+            animation: slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .flash-success {
+            background: rgba(16, 185, 129, 0.12);
+            border: 1px solid rgba(16, 185, 129, 0.25);
+            color: var(--accent-green);
+        }
+
+        .flash-error {
+            background: rgba(244, 63, 94, 0.12);
+            border: 1px solid rgba(244, 63, 94, 0.25);
+            color: var(--accent-red);
+        }
+
+        /* Dropdown navbar */
+        .dropdown {
+            position: relative;
+        }
+        .dropdown-menu {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            background: #0d1117;
+            border: 1px solid var(--surface-border);
+            border-radius: 8px;
+            padding: 0.5rem 0;
+            min-width: 220px;
+            list-style: none;
+            z-index: 1000;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        .dropdown:hover .dropdown-menu {
+            display: block;
+        }
+        .dropdown-menu li a {
+            padding: 0.6rem 1rem !important;
+            display: flex !important;
+            align-items: center !important;
+            gap: 0.5rem !important;
+            color: var(--text-secondary) !important;
+            text-decoration: none !important;
+            font-size: 0.85rem !important;
+            border: none !important;
+        }
+        .dropdown-menu li a:hover {
+            color: var(--text-primary) !important;
+            background: rgba(255,255,255,0.04) !important;
+        }
+
+        /* Footer */
+        footer {
+            text-align: center;
+            padding: 1.5rem;
+            border-top: 1px solid var(--surface-border);
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+            background: rgba(3, 4, 7, 0.6);
+            backdrop-filter: blur(10px);
+        }
+
+        footer a {
+            color: var(--accent-gold);
+            text-decoration: none;
+        }
+
+        /* Keyframes */
+        @keyframes pulse {
+            0% { filter: drop-shadow(0 0 2px rgba(255, 183, 3, 0.3)); }
+            100% { filter: drop-shadow(0 0 12px rgba(255, 183, 3, 0.6)); }
+        }
+
+        @keyframes slideIn {
+            from { transform: translateY(-10px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        /* Responsive Grid & Utilities */
+        .flex-between {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        /* Text Colors */
+        .text-green {
+            color: var(--accent-green);
+        }
+        .text-red {
+            color: var(--accent-red);
+        }
+
+        .lang-badge {
+            text-decoration: none;
+            padding: 0.2rem 0.4rem;
+            font-size: 0.65rem;
+            border: none;
+            background: transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all var(--transition-speed);
+        }
+        .lang-badge.active {
+            background: var(--accent-gold);
+            color: #030407;
+        }
+
+        .badge {
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .badge-success {
+            background: rgba(16, 185, 129, 0.12);
+            color: var(--accent-green);
+            border: 1px solid rgba(16, 185, 129, 0.25);
+        }
+
+        .badge-danger {
+            background: rgba(244, 63, 94, 0.12);
+            color: var(--accent-red);
+            border: 1px solid rgba(244, 63, 94, 0.25);
+        }
+
+        .badge-warning {
+            background: rgba(255, 183, 3, 0.12);
+            color: var(--accent-gold);
+            border: 1px solid rgba(255, 183, 3, 0.25);
+        }
+
+        @media (max-width: 768px) {
+            nav {
+                flex-direction: column;
+                gap: 1rem;
+                padding: 1rem;
+            }
+            .nav-links {
+                width: 100%;
+                justify-content: space-around;
+                font-size: 0.85rem;
+            }
+            main {
+                padding: 1.5rem 1rem;
+            }
+        }
+    </style>
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <nav>
+        <a href="/" class="logo">
+            <i class="fa-solid fa-circle-nodes"></i>
+            <span>Nexus AI</span>
+        </a>
+        
+        <div style="display: flex; align-items: center; gap: 2rem;">
+            <ul class="nav-links">
+                {% if session.get('user_id') %}
+                    <li><a href="/" class="{% if active_page == 'dashboard' %}active{% endif %}" id="nav-link-terminal"><i class="fa-solid fa-chart-line"></i> Торговый терминал</a></li>
+                    <li><a href="/orders" class="{% if active_page == 'orders' %}active{% endif %}" id="nav-link-all-orders"><i class="fa-solid fa-list-ul"></i> Все ордера</a></li>
+                    <li><a href="/decisions" class="{% if active_page == 'decisions' %}active{% endif %}" id="nav-link-decision-history"><i class="fa-solid fa-brain"></i> AI Decisions</a></li>
+                    
+                    <li class="dropdown">
+                        <a href="#" class="dropdown-toggle" onclick="return false;"><i class="fa-solid fa-folder-open"></i> Файлы <i class="fa-solid fa-chevron-down" style="font-size: 0.7rem; margin-left: 2px;"></i></a>
+                        <ul class="dropdown-menu">
+                            <li><a href="/download_combined"><i class="fa-solid fa-file-excel" style="color: var(--accent-gold);"></i> Сводный отчет (CSV)</a></li>
+                            <li><a href="/export_orders"><i class="fa-solid fa-file-csv" style="color: var(--accent-cyan);"></i> Экспорт ордеров (CSV)</a></li>
+                            <li><a href="/export_analysis"><i class="fa-solid fa-file-invoice" style="color: var(--accent-green);"></i> Экспорт решений ИИ (CSV)</a></li>
+                        </ul>
+                    </li>
+                    
+                    <li><a href="/settings" class="{% if active_page == 'settings' %}active{% endif %}"><i class="fa-solid fa-sliders"></i> {{ _t("settings") }}</a></li>
+                    <li><a href="/logout" class="btn btn-secondary btn-sm"><i class="fa-solid fa-right-from-bracket"></i> {{ _t("logout") }}</a></li>
+                {% else %}
+                    <li><a href="/login" class="{% if active_page == 'login' %}active{% endif %}">{{ _t("login") }}</a></li>
+                    <li><a href="/register" class="btn btn-primary btn-sm">{{ _t("register") }}</a></li>
+                {% endif %}
+            </ul>
+            
+            <div style="display: flex; gap: 0.3rem; align-items: center; background: rgba(255,255,255,0.03); padding: 0.25rem; border-radius: 6px; border: 1px solid var(--surface-border);">
+                <a href="/set_lang/en" class="badge lang-badge {% if current_lang == 'en' %}active{% endif %}">EN</a>
+                <a href="/set_lang/ru" class="badge lang-badge {% if current_lang == 'ru' %}active{% endif %}">RU</a>
+                <a href="/set_lang/uk" class="badge lang-badge {% if current_lang == 'uk' %}active{% endif %}">UA</a>
+            </div>
+        </div>
+    </nav>
+
+    <main>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <ul class="flashes">
+                    {% for category, message in messages %}
+                        <li class="flash-msg flash-{{ category }}">
+                            {% if category == 'success' %}
+                                <i class="fa-solid fa-circle-check"></i>
+                            {% else %}
+                                <i class="fa-solid fa-circle-exclamation"></i>
+                            {% endif %}
+                            {{ message }}
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer>
+        <p>&copy; 2026 AG-Bot Trading Simulator. Powered by Ensemble Machine Learning &amp; Binance API.</p>
+    </footer>
+
+    <script>
+    function handleNavTabClick(tabId) {
+        if (typeof switchTab === 'function') {
+            switchTab(tabId);
+            window.history.pushState(null, '', '/?tab=' + tabId);
+            
+            // Set active class on navbar links
+            document.querySelectorAll('.nav-tab-link').forEach(link => {
+                link.classList.remove('active');
+            });
+            const activeLink = document.getElementById('nav-link-' + tabId);
+            if (activeLink) activeLink.classList.add('active');
+            
+            return false; // prevent page reload
+        }
+        return true; // navigate normally
+    }
+    </script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>
