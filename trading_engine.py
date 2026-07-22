@@ -1140,7 +1140,16 @@ def evaluate_market_signal(persist_log=False, place_order=False):
         vol_blocked = current_atr > 4.0 * mean_hourly_atr
 
         trend_direction = "UP"
-        trend_tf = "5m" if timeframe == "1m" else timeframe
+        mtf_map = {
+            "1m": "5m",
+            "3m": "15m",
+            "5m": "15m",
+            "15m": "1h",
+            "30m": "2h",
+            "1h": "4h",
+            "4h": "1d"
+        }
+        trend_tf = mtf_map.get(timeframe, timeframe)
         try:
             klines_trend = fetch_binance_klines(pair, trend_tf, limit=500, market_type=market_type)
             if len(klines_trend) >= 50:
@@ -1216,7 +1225,7 @@ def evaluate_market_signal(persist_log=False, place_order=False):
             reason += " Сигнал инвертирован"
 
         indicators_str = f"RSI: {current_rsi_norm * 100:.1f}, ATR%: {current_atr_pct * 100:.4f}%, Trend: {trend_direction}"
-        trend_desc = f"EMA 50 ({trend_tf} MTF)" if timeframe == "1m" else f"EMA 50 ({timeframe})"
+        trend_desc = f"EMA 50 ({trend_tf} MTF)" if trend_tf != timeframe else f"EMA 50 ({timeframe})"
         stage1_out = f"{timeframe} Scalping Analysis.\nVolatility Filter: {'BLOCKED' if vol_blocked else 'OK'}\nHourly Average ATR: {mean_hourly_atr:.4f}\nCurrent ATR: {current_atr:.4f}\n{trend_desc} Trend Filter: {trend_direction}"
         stage2_out = f"DLinear Predictions:\n- t+1 Close Change: {pred_change_1m * 100:+.4f}%\n- t+2 Close Change: {pred_change_2m * 100:+.4f}%\n\nClassifier Success Probability: {prob * 100:.2f}%"
 
