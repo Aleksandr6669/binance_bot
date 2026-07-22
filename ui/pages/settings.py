@@ -229,7 +229,7 @@ def build_settings_view(page: ft.Page, lang: str):
                 settings.get("bot_started_at"),
                 1 if use_limit_sw.value else 0,
                 1 if use_trailing_sw.value else 0,
-                1 if use_ai_limit_sw.value else 0,
+                1 if (limit_offset_dd.value == "ai" or use_ai_limit_sw.value) else 0,
                 float(trailing_activation_field.value or 0.5),
                 float(trailing_step_field.value or 0.2),
                 1 if use_ai_exit_sw.value else 0,
@@ -543,6 +543,7 @@ def build_settings_view(page: ft.Page, lang: str):
     )
 
     limit_offset_options = [
+        ("ai", "🤖 Динамический отступ ИИ (DLinear)" if lang == "ru" else "🤖 AI Dynamic Offset (DLinear)"),
         ("0.1", "0.1% (Скальпинг)" if lang == "ru" else "0.1% (Scalping)"),
         ("0.2", "0.2% (Узкий откат)" if lang == "ru" else "0.2% (Narrow)"),
         ("0.5", "0.5% (Умеренный откат)" if lang == "ru" else "0.5% (Moderate)"),
@@ -552,11 +553,15 @@ def build_settings_view(page: ft.Page, lang: str):
         ("3.0", "3.0% (Широкий диапазон)" if lang == "ru" else "3.0% (Wide)"),
     ]
 
-    curr_limit_offset_val = settings.get("limit_offset_pct", 1.0)
-    try:
-        curr_limit_offset_str = f"{float(curr_limit_offset_val):.1f}"
-    except Exception:
-        curr_limit_offset_str = "1.0"
+    is_ai_limit_active = (settings.get("use_ai_limit_price", 0) == 1)
+    if is_ai_limit_active:
+        curr_limit_offset_str = "ai"
+    else:
+        curr_limit_offset_val = settings.get("limit_offset_pct", 1.0)
+        try:
+            curr_limit_offset_str = f"{float(curr_limit_offset_val):.1f}"
+        except Exception:
+            curr_limit_offset_str = "1.0"
 
     limit_offset_dd = make_dropdown(
         label=t("limit_offset_label", lang),
