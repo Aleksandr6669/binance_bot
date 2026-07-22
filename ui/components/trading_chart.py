@@ -78,73 +78,89 @@ class TradingChart(ft.Container):
             
             series_list = [price_series]
             
-            # Горизонтальные линии и ТОЧКА АКТИВАЦИИ для активных ордеров
+            # Горизонтальные линии и ТОЧКА АКТИВАЦИИ для активных и отложенных ордеров
             max_x_val = len(closes) - 1
             for o_row in active_orders:
                 o = dict(o_row)
                 entry = float(o["entry_price"])
                 side = str(o.get("side", "BUY")).upper()
-
-                act_x_index = 0
-                try:
-                    c_at = str(o.get("created_at", ""))
-                    if c_at:
-                        act_dt = datetime.strptime(c_at, "%Y-%m-%d %H:%M:%S")
-                        act_ts = act_dt.timestamp()
-                        for idx, k in enumerate(sliced_klines):
-                            k_ts = k[0] / 1000
-                            if k_ts <= act_ts < k_ts + 60 or (idx == len(sliced_klines) - 1 and act_ts >= k_ts):
-                                act_x_index = idx
-                                break
-                except Exception:
-                    act_x_index = 0
+                order_status = str(o.get("status", "ACTIVE")).upper()
+                is_active_pos = (order_status == "ACTIVE")
 
                 marker_color = "#10b981" if side == "BUY" else "#ef4444"
 
-                series_list.append(
-                    ftc.LineChartData(
-                        points=[ftc.LineChartDataPoint(act_x_index, entry), ftc.LineChartDataPoint(max_x_val, entry)],
-                        stroke_width=1.5,
-                        color="#38bdf8",
-                        dash_pattern=[5, 5]
-                    )
-                )
-                series_list.append(
-                    ftc.LineChartData(
-                        points=[ftc.LineChartDataPoint(act_x_index, min_y_val), ftc.LineChartDataPoint(act_x_index, entry)],
-                        stroke_width=1.5,
-                        color=marker_color,
-                        dash_pattern=[2, 2]
-                    )
-                )
-                series_list.append(
-                    ftc.LineChartData(
-                        points=[ftc.LineChartDataPoint(act_x_index, entry)],
-                        stroke_width=0,
-                        color=marker_color,
-                        point=ftc.ChartCirclePoint(radius=6, color=marker_color, stroke_width=2, stroke_color="#ffffff")
-                    )
-                )
-                
-                if o.get("take_profit"):
-                    tp = float(o["take_profit"])
+                if is_active_pos:
+                    act_x_index = 0
+                    try:
+                        c_at = str(o.get("created_at", ""))
+                        if c_at:
+                            act_dt = datetime.strptime(c_at, "%Y-%m-%d %H:%M:%S")
+                            act_ts = act_dt.timestamp()
+                            for idx, k in enumerate(sliced_klines):
+                                k_ts = k[0] / 1000
+                                if k_ts <= act_ts < k_ts + 60 or (idx == len(sliced_klines) - 1 and act_ts >= k_ts):
+                                    act_x_index = idx
+                                    break
+                    except Exception:
+                        act_x_index = 0
+
+                    # 1. Линия входа от точки активации вправо
                     series_list.append(
                         ftc.LineChartData(
-                            points=[ftc.LineChartDataPoint(act_x_index, tp), ftc.LineChartDataPoint(max_x_val, tp)],
-                            stroke_width=1,
-                            color="#10b981",
-                            dash_pattern=[3, 3]
+                            points=[ftc.LineChartDataPoint(act_x_index, entry), ftc.LineChartDataPoint(max_x_val, entry)],
+                            stroke_width=1.5,
+                            color="#38bdf8",
+                            dash_pattern=[5, 5]
+                        )
+                    )
+                    # 2. Вертикальная пунктирная линия активации
+                    series_list.append(
+                        ftc.LineChartData(
+                            points=[ftc.LineChartDataPoint(act_x_index, min_y_val), ftc.LineChartDataPoint(act_x_index, entry)],
+                            stroke_width=1.5,
+                            color=marker_color,
+                            dash_pattern=[2, 2]
+                        )
+                    )
+                    # 3. ТОЧКА АКТИВАЦИИ (Яркий кружок ТОЛЬКО при сработавшем ордере ACTIVE)
+                    series_list.append(
+                        ftc.LineChartData(
+                            points=[ftc.LineChartDataPoint(act_x_index, entry)],
+                            stroke_width=0,
+                            color=marker_color,
+                            point=ftc.ChartCirclePoint(radius=6, color=marker_color, stroke_width=2, stroke_color="#ffffff")
                         )
                     )
                     
-                if o.get("stop_loss"):
-                    sl = float(o["stop_loss"])
+                    if o.get("take_profit"):
+                        tp = float(o["take_profit"])
+                        series_list.append(
+                            ftc.LineChartData(
+                                points=[ftc.LineChartDataPoint(act_x_index, tp), ftc.LineChartDataPoint(max_x_val, tp)],
+                                stroke_width=1,
+                                color="#10b981",
+                                dash_pattern=[3, 3]
+                            )
+                        )
+                        
+                    if o.get("stop_loss"):
+                        sl = float(o["stop_loss"])
+                        series_list.append(
+                            ftc.LineChartData(
+                                points=[ftc.LineChartDataPoint(act_x_index, sl), ftc.LineChartDataPoint(max_x_val, sl)],
+                                stroke_width=1,
+                                color="#ef4444",
+                                dash_pattern=[3, 3]
+                            )
+                        )
+                else:
+                    # PENDING: Показываем только жёлтую пунктирную линию уровня отложенного ордера (без кружка и верт. линии)
                     series_list.append(
                         ftc.LineChartData(
-                            points=[ftc.LineChartDataPoint(act_x_index, sl), ftc.LineChartDataPoint(max_x_val, sl)],
-                            stroke_width=1,
-                            color="#ef4444",
-                            dash_pattern=[3, 3]
+                            points=[ftc.LineChartDataPoint(0, entry), ftc.LineChartDataPoint(max_x_val, entry)],
+                            stroke_width=1.5,
+                            color="#eab308",
+                            dash_pattern=[4, 4]
                         )
                     )
             
