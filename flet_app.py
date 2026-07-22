@@ -11,17 +11,58 @@ from ui.pages.history import build_history_view
 from ui.pages.decisions import build_decisions_view
 from ui.pages.settings import build_settings_view
 
+_tz_cache = {}
+
+def get_client_tz_offset(client_ip: str) -> int:
+    """
+    Динамически определяет смещение часового пояса (в минутах от UTC) для конкретного браузерного клиента на основе его IP-адреса.
+    """
+    import datetime
+    try:
+        default_offset = int(datetime.datetime.now().astimezone().utcoffset().total_seconds() / 60)
+    except Exception:
+        default_offset = 180
+
+    if not client_ip or client_ip in ("127.0.0.1", "::1", "localhost"):
+        return default_offset
+
+    if client_ip in _tz_cache:
+        return _tz_cache[client_ip]
+
+    try:
+        import urllib.request, json, zoneinfo
+        url = f"http://ip-api.com/json/{client_ip}?fields=status,timezone"
+        req = urllib.request.Request(url, headers={"User-Agent": "NexusBot/1.0"})
+        with urllib.request.urlopen(req, timeout=2) as res:
+            data = json.loads(res.read().decode("utf-8"))
+            if data.get("status") == "success" and data.get("timezone"):
+                tz_name = data["timezone"]
+                tz = zoneinfo.ZoneInfo(tz_name)
+                offset_min = int(datetime.datetime.now(tz).utcoffset().total_seconds() / 60)
+                _tz_cache[client_ip] = offset_min
+                return offset_min
+    except Exception as ex:
+        print(f"IP timezone lookup failed for {client_ip}: {ex}")
+
+    _tz_cache[client_ip] = default_offset
+    return default_offset
+
 def main(page: ft.Page):
     page.title = "Nexus AI - Trading Terminal"
     page.theme_mode = ft.ThemeMode.DARK
     page.bgcolor = BG_COLOR
+
+    # Автоматически настраиваем таймзону конкретного сеанса
     try:
         import datetime as _dt_env
         offset_sec = _dt_env.datetime.now().astimezone().utcoffset().total_seconds()
-        system_offset = int(offset_sec / 60)
-        page.tz_offset = system_offset
+        page.tz_offset = int(offset_sec / 60)
     except Exception:
         page.tz_offset = 180
+
+    client_ip = getattr(page, "client_ip", None)
+    if client_ip:
+        page.tz_offset = get_client_tz_offset(client_ip)
 
     try:
         if hasattr(page, "window"):
