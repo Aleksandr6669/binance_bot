@@ -198,25 +198,29 @@ def build_dashboard_view(page: ft.Page, lang: str):
                 entry = float(o["entry_price"])
                 side = o["side"]
                 
-                # Индивидуальный нереализованный PNL ордера
+                # Индивидуальный нереализованный PNL ордера (только для ACTIVE)
+                order_status = str(o.get("status", "ACTIVE")).upper()
                 unrealized = 0.0
-                if current_price > 0:
+                if order_status == "ACTIVE" and current_price > 0:
                     if side == "BUY":
                         unrealized = amount * (current_price - entry)
                     else:
                         unrealized = amount * (entry - current_price)
-                    
+
                 unrealized_color = "#10b981" if unrealized >= 0 else "#ef4444"
                 leverage_str = f" | Lev: {o['leverage']}x" if (dict(o).get("market_type", "SPOT") or "SPOT").upper() == "FUTURES" else ""
                 tp_str = f"${float(o['take_profit']):.2f}" if o.get("take_profit") else "—"
                 sl_str = f"${float(o['stop_loss']):.2f}" if o.get("stop_loss") else "—"
 
+                pnl_display_str = f"${unrealized:+.2f}" if order_status == "ACTIVE" else "PENDING"
+                status_bg = "#0284c7" if order_status == "ACTIVE" else "#eab308"
+
                 if order_id in rendered_orders:
                     # Обновляем тексты существующего ордера (без пересоздания виджета)
                     info = rendered_orders[order_id]
                     info["price_text"].value = f"${current_price:.2f}"
-                    info["pnl_text"].value = f"${unrealized:+.2f}"
-                    info["pnl_text"].color = unrealized_color
+                    info["pnl_text"].value = pnl_display_str
+                    info["pnl_text"].color = unrealized_color if order_status == "ACTIVE" else "#eab308"
                     info["sl_text"].value = f"SL: {sl_str}"
                     info["tp_text"].value = f"TP: {tp_str}"
                 else:
@@ -225,7 +229,7 @@ def build_dashboard_view(page: ft.Page, lang: str):
                     sl_text = ft.Text(f"SL: {sl_str}", size=11, color="#f43f5e")
                     tp_text = ft.Text(f"TP: {tp_str}", size=11, color="#10b981")
 
-                    order_pnl_text = ft.Text(f"${unrealized:+.2f}", weight=ft.FontWeight.BOLD, color=unrealized_color, size=13)
+                    order_pnl_text = ft.Text(pnl_display_str, weight=ft.FontWeight.BOLD, color=unrealized_color if order_status == "ACTIVE" else "#eab308", size=13)
                     
                     def make_close_handler(oid):
                         def handler(e):
@@ -283,8 +287,8 @@ def build_dashboard_view(page: ft.Page, lang: str):
                                     ft.Text("LIVE RESULT", size=9, color="#94a3b8", weight=ft.FontWeight.BOLD),
                                     order_pnl_text,
                                     ft.Container(
-                                        content=ft.Text("ACTIVE", size=8, color="#ffffff", weight=ft.FontWeight.BOLD),
-                                        bgcolor="#0284c7",
+                                        content=ft.Text(order_status, size=8, color="#ffffff", weight=ft.FontWeight.BOLD),
+                                        bgcolor=status_bg,
                                         padding=ft.Padding.symmetric(vertical=1, horizontal=4),
                                         border_radius=4
                                     )
