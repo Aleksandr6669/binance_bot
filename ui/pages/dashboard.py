@@ -208,20 +208,26 @@ def build_dashboard_view(page: ft.Page, lang: str):
                     else:
                         unrealized = amount * (entry - current_price)
 
-                unrealized_color = "#10b981" if unrealized >= 0 else "#ef4444"
+                is_active = (order_status == "ACTIVE")
+                if is_active:
+                    pnl_display_str = f"${unrealized:+.2f}"
+                    pnl_color = "#10b981" if unrealized >= 0 else "#ef4444"
+                else:
+                    pnl_display_str = "$0.00"
+                    pnl_color = "#eab308"
+
                 leverage_str = f" | Lev: {o['leverage']}x" if (dict(o).get("market_type", "SPOT") or "SPOT").upper() == "FUTURES" else ""
                 tp_str = f"${float(o['take_profit']):.2f}" if o.get("take_profit") else "—"
                 sl_str = f"${float(o['stop_loss']):.2f}" if o.get("stop_loss") else "—"
 
-                pnl_display_str = f"${unrealized:+.2f}" if order_status == "ACTIVE" else "PENDING"
-                status_bg = "#0284c7" if order_status == "ACTIVE" else "#eab308"
+                status_bg = "#0284c7" if is_active else "#eab308"
 
                 if order_id in rendered_orders:
                     # Обновляем тексты существующего ордера (без пересоздания виджета)
                     info = rendered_orders[order_id]
                     info["price_text"].value = f"${current_price:.2f}"
                     info["pnl_text"].value = pnl_display_str
-                    info["pnl_text"].color = unrealized_color if order_status == "ACTIVE" else "#eab308"
+                    info["pnl_text"].color = pnl_color
                     info["sl_text"].value = f"SL: {sl_str}"
                     info["tp_text"].value = f"TP: {tp_str}"
                 else:
@@ -230,7 +236,7 @@ def build_dashboard_view(page: ft.Page, lang: str):
                     sl_text = ft.Text(f"SL: {sl_str}", size=11, color="#f43f5e")
                     tp_text = ft.Text(f"TP: {tp_str}", size=11, color="#10b981")
 
-                    order_pnl_text = ft.Text(pnl_display_str, weight=ft.FontWeight.BOLD, color=unrealized_color if order_status == "ACTIVE" else "#eab308", size=13)
+                    order_pnl_text = ft.Text(pnl_display_str, weight=ft.FontWeight.BOLD, color=pnl_color, size=13)
                     
                     def make_close_handler(oid):
                         def handler(e):
