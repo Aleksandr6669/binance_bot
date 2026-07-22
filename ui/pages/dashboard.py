@@ -5,7 +5,7 @@ import json
 import trading_engine
 import threading
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from ui.theme import *
 from ui.i18n import t, get_lang
 from ui.layout import build_layout
@@ -360,13 +360,12 @@ def build_dashboard_view(page: ft.Page, lang: str):
 
         # 5. История логов нейросети
         tz_offset = getattr(page, "tz_offset", 180)
-        user_tz = datetime.timezone(datetime.timedelta(minutes=tz_offset))
+        user_tz = timezone(timedelta(minutes=tz_offset))
 
         def to_client_local_str(ts_str):
             if not ts_str:
                 return "—"
             try:
-                from datetime import timezone
                 utc_dt = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
                 return utc_dt.astimezone(user_tz).strftime("%Y-%m-%d %H:%M:%S")
             except Exception:
