@@ -317,8 +317,8 @@ def build_history_view(page: ft.Page, lang: str):
                             # Col 5: Date
                             ft.Column([
                                 ft.Text("DATE", size=9, color="#94a3b8", weight=ft.FontWeight.BOLD),
-                                ft.Text(utc_to_local(o['created_at']).split(" ")[0], size=12, color="#f8fafc"),
-                                ft.Text(utc_to_local(o['created_at']).split(" ")[1] if " " in utc_to_local(o['created_at']) else "", size=11, color="#94a3b8")
+                                ft.Text(utc_to_local(o['created_at'], tz_offset).split(" ")[0], size=12, color="#f8fafc"),
+                                ft.Text(utc_to_local(o['created_at'], tz_offset).split(" ")[1] if " " in utc_to_local(o['created_at'], tz_offset) else "", size=11, color="#94a3b8")
                             ], spacing=2, width=90),
                             
                             # Col 6: PnL & Status
@@ -562,8 +562,8 @@ def build_history_view(page: ft.Page, lang: str):
                                     # Col 5: Date
                                     ft.Column([
                                         ft.Text("DATE", size=9, color="#94a3b8", weight=ft.FontWeight.BOLD),
-                                        ft.Text(utc_to_local(o['created_at']).split(" ")[0], size=12, color="#f8fafc"),
-                                        ft.Text(utc_to_local(o['created_at']).split(" ")[1] if " " in utc_to_local(o['created_at']) else "", size=11, color="#94a3b8")
+                                        ft.Text(utc_to_local(o['created_at'], tz_offset).split(" ")[0], size=12, color="#f8fafc"),
+                                        ft.Text(utc_to_local(o['created_at'], tz_offset).split(" ")[1] if " " in utc_to_local(o['created_at'], tz_offset) else "", size=11, color="#94a3b8")
                                     ], spacing=2, width=90),
                                     
                                     # Col 6: PnL & Status

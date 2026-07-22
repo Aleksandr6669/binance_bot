@@ -359,6 +359,19 @@ def build_dashboard_view(page: ft.Page, lang: str):
             print(f"Error fetching order history: {e}")
 
         # 5. История логов нейросети
+        tz_offset = getattr(page, "tz_offset", 180)
+        user_tz = datetime.timezone(datetime.timedelta(minutes=tz_offset))
+
+        def to_client_local_str(ts_str):
+            if not ts_str:
+                return "—"
+            try:
+                from datetime import timezone
+                utc_dt = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                return utc_dt.astimezone(user_tz).strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                return ts_str
+
         try:
             analysis_logs = await asyncio.to_thread(db.get_all_analysis_logs)
             logs_history_column.controls.clear()
@@ -368,7 +381,7 @@ def build_dashboard_view(page: ft.Page, lang: str):
             else:
                 import json as _json
                 for l in analysis_logs[-10:][::-1]:
-                    ts = l.get('created_at', '')
+                    ts = to_client_local_str(l.get('created_at', ''))
                     pair_lbl = l.get('pair', '')
                     try:
                         s3 = _json.loads(l.get('stage3_output', '{}'))
@@ -450,13 +463,7 @@ def build_dashboard_view(page: ft.Page, lang: str):
                 except Exception:
                     ml_logs_stage3.value = latest_log.get("stage3_output") or "—"
                 
-                ts = latest_log.get("created_at", "—")
-                try:
-                    from datetime import timezone
-                    utc_dt = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
-                    ts = utc_dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
-                except Exception:
-                    pass
+                ts = to_client_local_str(latest_log.get("created_at", "—"))
                 ml_log_time.value = f"🕐  Last run: {ts} ({source_desc})"
                 ml_strategy_title.value = f"{t_ai_strat} ({pair} • {timeframe} • {market_type})"
             else:
