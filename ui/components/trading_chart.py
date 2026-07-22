@@ -122,9 +122,7 @@ class TradingChart(ft.Container):
                         points=[ftc.LineChartDataPoint(act_x_index, entry)],
                         stroke_width=0,
                         color=marker_color,
-                        show_markers=True,
-                        marker_size=12,
-                        marker_color=marker_color
+                        point=ftc.ChartCirclePoint(radius=6, color=marker_color, stroke_width=2, stroke_color="#ffffff")
                     )
                 )
                 
