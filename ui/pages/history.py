@@ -126,7 +126,10 @@ def build_history_view(page: ft.Page, lang: str):
         if picker_control.value:
             dt = picker_control.value
             key, text_control, container = picker_control.user_data
-            formatted_date = f"{dt.year:04d}-{dt.month:02d}-{dt.day:02d}"
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=_dt_mod.timezone.utc)
+            local_dt = dt.astimezone(user_tz)
+            formatted_date = f"{local_dt.year:04d}-{local_dt.month:02d}-{local_dt.day:02d}"
             filter_state[key] = formatted_date
             text_control.value = formatted_date
             text_control.color = "#f8fafc"
