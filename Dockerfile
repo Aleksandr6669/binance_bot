@@ -25,6 +25,7 @@ ENV HOST=0.0.0.0
 ENV PORT=7860
 ENV FLET_WEB_MODE=1
 ENV FLASK_DEBUG=False
+ENV BINANCE_PROXY=http://ejvhgkjs:ida3932fmy33@89.116.78.26:5637
 
 # Hugging Face Spaces expose port 7860 by default
 EXPOSE 7860
