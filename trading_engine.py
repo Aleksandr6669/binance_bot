@@ -409,26 +409,16 @@ def place_scalping_order(pair, entry_price, trading_mode, size_usdt, market_type
     use_limit_orders = settings_dict.get("use_limit_orders", 1)
     use_ai_limit_price = settings_dict.get("use_ai_limit_price", 0)
 
-    if use_ai_limit_price and pred_change_1m is not None:
-        # Использовать прогноз нейросети (1m) вместо ATR для расчета TP/SL и смещения лимитки
-        predicted_move = entry_price * abs(pred_change_1m)
-        min_move = entry_price * 0.001  # Минимальный порог 0.1% для стабильности
-        predicted_move = max(predicted_move, min_move)
-        
-        offset_tp = 2.0 * predicted_move
-        offset_sl = 1.0 * predicted_move
-        limit_offset = 0.5 * predicted_move
-        
-        if limit_offset < entry_price * 0.0005:
-            limit_offset = entry_price * 0.0005
-    elif atr and atr > 0:
+    if atr and atr > 0:
         offset_tp = 4.0 * atr
         offset_sl = 2.0 * atr
-        limit_offset = max(entry_price * 0.001, atr * 0.5)
     else:
         offset_tp = entry_price * 0.006
         offset_sl = entry_price * 0.003
-        limit_offset = entry_price * 0.002
+
+    # Calculate limit order offset based on user settings (default 1.0%)
+    limit_offset_pct = float(settings_dict.get("limit_offset_pct", 1.0) or 1.0)
+    limit_offset = entry_price * (limit_offset_pct / 100.0)
 
     # Decide order type based purely on user settings
     use_market = not bool(use_limit_orders)

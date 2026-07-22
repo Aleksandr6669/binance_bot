@@ -75,6 +75,7 @@ def init_db():
         "ALTER TABLE settings ADD COLUMN futures_leverage INTEGER DEFAULT 10",
         "ALTER TABLE settings ADD COLUMN use_proxy INTEGER DEFAULT 0",
         "ALTER TABLE settings ADD COLUMN proxy_url TEXT",
+        "ALTER TABLE settings ADD COLUMN limit_offset_pct REAL DEFAULT 1.0",
         "ALTER TABLE orders ADD COLUMN user_id INTEGER DEFAULT 0",
         "ALTER TABLE orders ADD COLUMN trailing_distance REAL",
         "ALTER TABLE orders ADD COLUMN leverage INTEGER DEFAULT 1",
@@ -197,11 +198,11 @@ def get_settings():
     conn.close()
     return dict(settings) if settings else None
 
-def save_settings(trading_pair, timeframe, order_size_usdt, bot_enabled, trading_mode, market_type="SPOT", futures_leverage=10, min_probability_threshold=0.88, invert_signal=0, bot_started_at=None, use_limit_orders=1, use_trailing_stop=1, use_ai_limit_price=0, trailing_activation_pct=0.5, trailing_step_pct=0.2, use_ai_exit=0, use_ai_trailing=0, daily_loss_limit=0.0, daily_profit_target=0.0):
+def save_settings(trading_pair, timeframe, order_size_usdt, bot_enabled, trading_mode, market_type="SPOT", futures_leverage=10, min_probability_threshold=0.88, invert_signal=0, bot_started_at=None, use_limit_orders=1, use_trailing_stop=1, use_ai_limit_price=0, trailing_activation_pct=0.5, trailing_step_pct=0.2, use_ai_exit=0, use_ai_trailing=0, daily_loss_limit=0.0, daily_profit_target=0.0, limit_offset_pct=1.0):
     conn = get_db_connection()
     conn.execute(
-        '''UPDATE settings SET trading_pair = ?, timeframe = ?, order_size_usdt = ?, bot_enabled = ?, trading_mode = ?, market_type = ?, futures_leverage = ?, min_probability_threshold = ?, invert_signal = ?, bot_started_at = ?, use_limit_orders = ?, use_trailing_stop = ?, use_ai_limit_price = ?, trailing_activation_pct = ?, trailing_step_pct = ?, use_ai_exit = ?, use_ai_trailing = ?, daily_loss_limit = ?, daily_profit_target = ? WHERE id = 1''',
-        (trading_pair.upper(), timeframe, order_size_usdt, int(bot_enabled), trading_mode, market_type, futures_leverage, float(min_probability_threshold), invert_signal, bot_started_at, use_limit_orders, use_trailing_stop, use_ai_limit_price, trailing_activation_pct, trailing_step_pct, use_ai_exit, use_ai_trailing, float(daily_loss_limit), float(daily_profit_target))
+        '''UPDATE settings SET trading_pair = ?, timeframe = ?, order_size_usdt = ?, bot_enabled = ?, trading_mode = ?, market_type = ?, futures_leverage = ?, min_probability_threshold = ?, invert_signal = ?, bot_started_at = ?, use_limit_orders = ?, use_trailing_stop = ?, use_ai_limit_price = ?, trailing_activation_pct = ?, trailing_step_pct = ?, use_ai_exit = ?, use_ai_trailing = ?, daily_loss_limit = ?, daily_profit_target = ?, limit_offset_pct = ? WHERE id = 1''',
+        (trading_pair.upper(), timeframe, order_size_usdt, int(bot_enabled), trading_mode, market_type, futures_leverage, float(min_probability_threshold), invert_signal, bot_started_at, use_limit_orders, use_trailing_stop, use_ai_limit_price, trailing_activation_pct, trailing_step_pct, use_ai_exit, use_ai_trailing, float(daily_loss_limit), float(daily_profit_target), float(limit_offset_pct))
     )
     conn.commit()
     conn.close()

@@ -235,7 +235,8 @@ def build_settings_view(page: ft.Page, lang: str):
                 1 if use_ai_exit_sw.value else 0,
                 1 if use_ai_trailing_sw.value else 0,
                 float(loss_limit_field.value or 0),
-                float(profit_target_field.value or 0)
+                float(profit_target_field.value or 0),
+                float(limit_offset_dd.value or 1.0)
             )
             t_saved = t("settings_saved", lang)
             # No cache invalidation needed — dashboard_refresher uses continue not break
@@ -539,6 +540,29 @@ def build_settings_view(page: ft.Page, lang: str):
         value=curr_prob_str,
         on_change=trigger_autosave_instant
     )
+
+    limit_offset_options = [
+        ("0.1", "0.1% (Скальпинг)" if lang == "ru" else "0.1% (Scalping)"),
+        ("0.2", "0.2% (Узкий откат)" if lang == "ru" else "0.2% (Narrow)"),
+        ("0.5", "0.5% (Умеренный откат)" if lang == "ru" else "0.5% (Moderate)"),
+        ("1.0", "1.0% (Тестовый 1% / По умолчанию)" if lang == "ru" else "1.0% (Test 1% / Default)"),
+        ("1.5", "1.5% (Глубокий откат)" if lang == "ru" else "1.5% (Deep)"),
+        ("2.0", "2.0% (Максимальный откат)" if lang == "ru" else "2.0% (Max)"),
+        ("3.0", "3.0% (Широкий диапазон)" if lang == "ru" else "3.0% (Wide)"),
+    ]
+
+    curr_limit_offset_val = settings.get("limit_offset_pct", 1.0)
+    try:
+        curr_limit_offset_str = f"{float(curr_limit_offset_val):.1f}"
+    except Exception:
+        curr_limit_offset_str = "1.0"
+
+    limit_offset_dd = make_dropdown(
+        label=t("limit_offset_label", lang),
+        options=[ft.dropdown.Option(k, v) for k, v in limit_offset_options],
+        value=curr_limit_offset_str,
+        on_change=trigger_autosave_instant
+    )
     
     # Segment toggles for Fixed vs Percent size
     is_pct = "%" in str(settings.get("order_size_usdt", "100"))
@@ -668,6 +692,7 @@ def build_settings_view(page: ft.Page, lang: str):
             market_type_dd,
             mode_dd,
             prob_field,
+            limit_offset_dd,
             ft.Container(height=4),
             ft.Text(t("position_size_title", lang), size=11, color="#94a3b8", weight=ft.FontWeight.BOLD),
             ft.Row([size_mode_selector], expand=True),

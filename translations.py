@@ -230,6 +230,7 @@ TRANSLATIONS = {
         "invert_signal_desc": "SELL станет BUY и наоборот.",
         "use_limit_orders_title": "ИСПОЛЬЗОВАТЬ ЛИМИТНЫЕ ОРДЕРА",
         "use_limit_orders_desc": "Входить в сделки лимитками для экономии комиссий.",
+        "limit_offset_label": "ОТСТУП ЛИМИТНОГО ОРДЕРА (%)",
         "ai_trade_range_title": "AI ДИАПАЗОН СДЕЛКИ (TP/SL)",
         "ai_trade_range_desc": "Использовать прогноз (1m) вместо ATR для TP/SL.",
         "ai_exit_title": "ЗАКРЫТИЕ ПО СИГНАЛУ ИИ",
