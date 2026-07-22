@@ -16,8 +16,9 @@ def main(page: ft.Page):
     page.theme_mode = ft.ThemeMode.DARK
     page.bgcolor = BG_COLOR
     try:
-        import time
-        system_offset = int(-time.timezone / 60) if hasattr(time, "timezone") and time.timezone != 0 else 180
+        import datetime as _dt_env
+        offset_sec = _dt_env.datetime.now().astimezone().utcoffset().total_seconds()
+        system_offset = int(offset_sec / 60)
         page.tz_offset = system_offset
     except Exception:
         page.tz_offset = 180
