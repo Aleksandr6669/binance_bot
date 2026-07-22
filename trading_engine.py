@@ -1004,8 +1004,9 @@ def run_user_scalping_cycle():
         
         prob = scalping_ensemble.classifier_model.predict(features)[0]
         
-        # Считываем порог вероятности из настроек пользователя
-        threshold = float(dict(settings).get("min_probability_threshold", 0.88) or 0.88)
+        # Считываем порог вероятности из настроек пользователя (учитываем 0.0)
+        raw_thresh = dict(settings).get("min_probability_threshold")
+        threshold = float(raw_thresh) if raw_thresh is not None else 0.65
         
         # Инициализируем состояние сигнала заранее, чтобы любые исключения во время инференса
         # не привели к UnboundLocalError при формировании результата.
@@ -1214,7 +1215,8 @@ def evaluate_market_signal(persist_log=False, place_order=False):
         ]])
 
         prob = float(scalping_ensemble.classifier_model.predict(features)[0])
-        threshold = float(dict(settings).get("min_probability_threshold", 0.65) or 0.65)
+        raw_thresh = dict(settings).get("min_probability_threshold")
+        threshold = float(raw_thresh) if raw_thresh is not None else 0.65
         invert_signal = bool(dict(settings).get("invert_signal", 0))
 
         action = "HOLD"
