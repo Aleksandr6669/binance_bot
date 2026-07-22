@@ -388,10 +388,16 @@ def build_decisions_view(page: ft.Page, lang: str):
             date_container.update()
             run_apply()
 
-    date_picker = ft.DatePicker(on_change=on_date_picked)
+    init_dt = datetime.datetime.strptime(today_str, "%Y-%m-%d")
+    date_picker = ft.DatePicker(value=init_dt, on_change=on_date_picked)
     page.overlay.append(date_picker)
 
     def open_date_picker(e):
+        if filter_state["date"]:
+            try:
+                date_picker.value = datetime.datetime.strptime(filter_state["date"], "%Y-%m-%d")
+            except Exception:
+                pass
         date_picker.open = True
         date_picker.update()
 
