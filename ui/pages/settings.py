@@ -30,7 +30,8 @@ def fetch_symbols_background(market_type):
         import requests
         import trading_engine
         proxies = trading_engine.get_binance_proxies()
-        res = requests.get(url, timeout=5, proxies=proxies)
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        res = requests.get(url, headers=headers, timeout=15, proxies=proxies)
         if res.status_code == 200:
             data = res.json()
             symbols = [s["symbol"] for s in data["symbols"] if s.get("status") == "TRADING"]

@@ -29,7 +29,7 @@ def get_binance_proxies():
     proxy = None
     try:
         settings = db.get_settings()
-        if settings and settings.get("use_proxy") and settings.get("proxy_url"):
+        if settings and settings.get("use_proxy") == 1 and settings.get("proxy_url"):
             proxy = settings["proxy_url"].strip()
     except Exception:
         pass
@@ -39,6 +39,9 @@ def get_binance_proxies():
 
     if proxy:
         proxy = proxy.strip()
+        if not (proxy.startswith("http://") or proxy.startswith("https://") or proxy.startswith("socks5://")):
+            proxy = "http://" + proxy
+
         # Устанавливаем системные переменные окружения, чтобы ВСЕ сетевые библиотеки
         # (requests, httpx, urllib3 и т.д.) автоматически использовали этот прокси
         os.environ["HTTP_PROXY"] = proxy
