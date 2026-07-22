@@ -381,12 +381,7 @@ def build_decisions_view(page: ft.Page, lang: str):
     def on_date_picked(e):
         if e.control.value:
             dt = e.control.value
-            # Convert to local timezone to prevent timezone-induced day shifts
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=datetime.timezone.utc)
-            local_dt = dt.astimezone()
-            
-            formatted = f"{local_dt.year:04d}-{local_dt.month:02d}-{local_dt.day:02d}"
+            formatted = f"{dt.year:04d}-{dt.month:02d}-{dt.day:02d}"
             filter_state["date"] = formatted
             date_text.value = formatted
             date_text.color = "#f8fafc"

@@ -125,14 +125,8 @@ def build_history_view(page: ft.Page, lang: str):
     def set_date_and_apply(picker_control):
         if picker_control.value:
             dt = picker_control.value
-            # Flet DatePicker возвращает datetime в UTC.
-            # Конвертируем в локальный timezone чтобы получить правильную дату
-            import datetime as _dt
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=_dt.timezone.utc)
-            local_dt = dt.astimezone()
             key, text_control, container = picker_control.user_data
-            formatted_date = f"{local_dt.year:04d}-{local_dt.month:02d}-{local_dt.day:02d}"
+            formatted_date = f"{dt.year:04d}-{dt.month:02d}-{dt.day:02d}"
             filter_state[key] = formatted_date
             text_control.value = formatted_date
             text_control.color = "#f8fafc"
