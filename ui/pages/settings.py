@@ -500,7 +500,11 @@ def build_settings_view(page: ft.Page, lang: str):
         ("0.80", "80% (Повышенная)" if lang == "ru" else "80% (High Confidence)"),
         ("0.85", "85% (Строгая)" if lang == "ru" else "85% (Strict)"),
         ("0.88", "88% (Высокая строжайшая)" if lang == "ru" else "88% (Very Strict)"),
-        ("0.90", "90% (Максимально строгая)" if lang == "ru" else "90% (Max Strict)")
+        ("0.90", "90% (Максимально строгая)" if lang == "ru" else "90% (Max Strict)"),
+        ("0.93", "93% (Ультра-строгая)" if lang == "ru" else "93% (Ultra Strict)"),
+        ("0.95", "95% (Премиальная)" if lang == "ru" else "95% (Premium)"),
+        ("0.98", "98% (Экстремальная)" if lang == "ru" else "98% (Extreme)"),
+        ("1.00", "100% (Абсолютная)" if lang == "ru" else "100% (Absolute)")
     ]
 
     curr_prob_val = settings.get("min_probability_threshold", 0.65)
