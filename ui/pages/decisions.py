@@ -169,8 +169,8 @@ def build_decisions_view(page: ft.Page, lang: str):
                 item_card = ft.Container(
                     content=ft.Column([
                         ft.Row([
-                            ft.Text(log['pair'], weight=ft.FontWeight.BOLD, size=13, color="#f8fafc"),
-                            ft.Text(f"{action} ({prob*100:.1f}%)", color=action_color, weight=ft.FontWeight.BOLD, size=12),
+                            ft.Text(log['pair'], weight=ft.FontWeight.BOLD, size=12, color="#f8fafc"),
+                            ft.Text(f"{action} ({prob*100:.1f}%)", color=action_color, weight=ft.FontWeight.BOLD, size=11, no_wrap=True),
                         ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                         ft.Row([
                             ft.Icon(ft.Icons.ACCESS_TIME_ROUNDED, size=11, color="#64748b"),
@@ -496,8 +496,8 @@ def build_decisions_view(page: ft.Page, lang: str):
                         card = ft.Container(
                             content=ft.Column([
                                 ft.Row([
-                                    ft.Text(log['pair'], weight=ft.FontWeight.BOLD, size=13, color="#f8fafc"),
-                                    ft.Text(f"{act} ({prb*100:.1f}%)", color=act_color, weight=ft.FontWeight.BOLD, size=12),
+                                    ft.Text(log['pair'], weight=ft.FontWeight.BOLD, size=12, color="#f8fafc"),
+                                    ft.Text(f"{act} ({prb*100:.1f}%)", color=act_color, weight=ft.FontWeight.BOLD, size=11, no_wrap=True),
                                 ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                                 ft.Row([
                                     ft.Icon(ft.Icons.ACCESS_TIME_ROUNDED, size=11, color="#64748b"),
