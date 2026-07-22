@@ -149,8 +149,8 @@ def build_dashboard_view(page: ft.Page, lang: str):
 
         # Суммируем реализованный PNL и нереализованный PNL текущих позиций
         total_pnl = realized_pnl + unrealized_pnl
-        base_bal = balance_val - realized_pnl
-        pnl_pct = (total_pnl / (base_bal + 1e-10)) * 100.0 if base_bal > 0 else 0.0
+        base_bal = display_bal if display_bal > 0 else (balance_val if balance_val > 0 else 100.0)
+        pnl_pct = (total_pnl / base_bal) * 100.0
 
         pnl_text.value = f"${total_pnl:+.2f} ({pnl_pct:+.2f}%)"
         pnl_text.color = "#10b981" if total_pnl >= 0 else "#ef4444"
