@@ -684,7 +684,9 @@ def close_live_position(pair, amount, market_type="SPOT", order_side="BUY"):
 
 def liquidate_order_manually(order_id):
     """
-    Закрывает ордер вручную по запросу пользователя.
+    Закрывает или отменяет ордер вручную по запросу пользователя.
+    Если ордер в статусе PENDING (отложенный) — отменяет его без фиксации PnL (pnl=0.0, status="CANCELED").
+    Если ордер в статусе ACTIVE — рассчитывает PnL и закрывает со статусом CLOSED_MANUAL.
     """
     orders = db.get_active_orders()
     target_order = next((o for o in orders if str(o["id"]) == str(order_id)), None)
@@ -696,10 +698,34 @@ def liquidate_order_manually(order_id):
     pair = target_order["pair"]
     market_type = target_order.get("market_type", "SPOT")
     trading_mode = target_order.get("trading_mode", "DEMO")
+    order_status = str(target_order.get("status", "ACTIVE")).upper()
     amount = float(target_order["amount"])
     entry = float(target_order["entry_price"])
     side = target_order["side"]
 
+    # Отмена отложенного PENDING ордера
+    if order_status == "PENDING":
+        if trading_mode == "LIVE":
+            try:
+                user = db.get_settings()
+                if user and user.get("binance_api_key") and user.get("binance_api_secret"):
+                    endpoint = "/fapi/v1/allOpenOrders" if market_type.upper() == "FUTURES" else "/api/v3/openOrders"
+                    send_signed_binance_request(user["binance_api_key"], user["binance_api_secret"], "DELETE", endpoint, {"symbol": pair.upper()}, market_type)
+            except Exception as ex:
+                print(f"Error cancelling LIVE pending orders on Binance: {ex}")
+
+        db.close_order(order_id, status="CANCELED", close_price=entry, pnl=0.0)
+        print(f"Pending order {order_id} cancelled with PnL 0.0")
+        send_notification(
+            f"🚫 <b>[{trading_mode} Mode] Отложенный ордер отменён</b>\n\n"
+            f"Пара: <b>{pair}</b>\n"
+            f"Тип: {side}\n"
+            f"Цена лимита: ${entry:,.4f}\n"
+            f"(Ордер не был активирован на рынке)"
+        )
+        return True
+
+    # Закрытие активной позиции (ACTIVE)
     current_price = fetch_current_price(pair, market_type)
     if current_price is None or current_price <= 0:
         print(f"Cannot liquidate order {order_id}: unable to fetch current price for {pair}.")

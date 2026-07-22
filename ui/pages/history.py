@@ -269,8 +269,12 @@ def build_history_view(page: ft.Page, lang: str):
                 return handler
 
             for o in orders:
-                pnl_val = float(o["pnl"]) if o["pnl"] is not None else 0.0
-                pnl_color = "#10b981" if pnl_val >= 0 else "#ef4444"
+                is_canceled = (o.get("status") == "CANCELED")
+                pnl_val = float(o["pnl"]) if (o["pnl"] is not None and not is_canceled) else 0.0
+                pnl_color = "#94a3b8" if is_canceled else ("#10b981" if pnl_val >= 0 else "#ef4444")
+                pnl_display_str = "$0.00" if is_canceled else f"{pnl_val:+.2f}$"
+                status_bg = "#64748b" if is_canceled else ("#334155" if "MANUAL" in str(o.get("status")) else ("#10b981" if "TP" in str(o.get("status")) else "#ef4444"))
+
                 card = ft.Container(
                     content=ft.Row(
                         [
@@ -297,7 +301,7 @@ def build_history_view(page: ft.Page, lang: str):
                             ft.Column([
                                 ft.Text("ENTRY / EXIT", size=9, color="#94a3b8", weight=ft.FontWeight.BOLD),
                                 ft.Text(f"${float(o['entry_price']):.2f}", size=12, color="#f8fafc"),
-                                ft.Text(f"${float(o['close_price']):.2f}" if o.get('close_price') is not None else "—", size=11, color="#94a3b8")
+                                ft.Text(f"${float(o['close_price']):.2f}" if (o.get('close_price') is not None and not is_canceled) else "—", size=11, color="#94a3b8")
                             ], spacing=2, width=110),
                             
                             # Col 3: Targets (SL / TP)
@@ -324,10 +328,10 @@ def build_history_view(page: ft.Page, lang: str):
                             # Col 6: PnL & Status
                             ft.Column([
                                 ft.Text("RESULT", size=9, color="#94a3b8", weight=ft.FontWeight.BOLD),
-                                ft.Text(f"{pnl_val:+.2f}$", size=13, weight=ft.FontWeight.BOLD, color=pnl_color),
+                                ft.Text(pnl_display_str, size=13, weight=ft.FontWeight.BOLD, color=pnl_color),
                                 ft.Container(
                                     content=ft.Text(o["status"], size=8, color="#ffffff", weight=ft.FontWeight.BOLD),
-                                    bgcolor="#334155" if "MANUAL" in o["status"] else ("#10b981" if "TP" in o["status"] else "#ef4444"),
+                                    bgcolor=status_bg,
                                     padding=ft.Padding.symmetric(vertical=1, horizontal=4),
                                     border_radius=4
                                 )
