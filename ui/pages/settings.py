@@ -543,7 +543,6 @@ def build_settings_view(page: ft.Page, lang: str):
     )
 
     limit_offset_options = [
-        ("ai", "🤖 Динамический отступ ИИ (DLinear)" if lang == "ru" else "🤖 AI Dynamic Offset (DLinear)"),
         ("0.1", "0.1% (Скальпинг)" if lang == "ru" else "0.1% (Scalping)"),
         ("0.2", "0.2% (Узкий откат)" if lang == "ru" else "0.2% (Narrow)"),
         ("0.5", "0.5% (Умеренный откат)" if lang == "ru" else "0.5% (Moderate)"),
@@ -553,21 +552,17 @@ def build_settings_view(page: ft.Page, lang: str):
         ("3.0", "3.0% (Широкий диапазон)" if lang == "ru" else "3.0% (Wide)"),
     ]
 
-    is_ai_limit_active = (settings.get("use_ai_limit_price", 0) == 1)
-    if is_ai_limit_active:
-        curr_limit_offset_str = "ai"
-    else:
-        curr_limit_offset_val = settings.get("limit_offset_pct", 1.0)
-        try:
-            curr_limit_offset_str = f"{float(curr_limit_offset_val):.1f}"
-        except Exception:
-            curr_limit_offset_str = "1.0"
+    curr_limit_offset_val = settings.get("limit_offset_pct", 1.0)
+    try:
+        curr_limit_offset_str = f"{float(curr_limit_offset_val):.1f}"
+    except Exception:
+        curr_limit_offset_str = "1.0"
 
     limit_offset_dd = make_dropdown(
         label=t("limit_offset_label", lang),
         options=[ft.dropdown.Option(k, v) for k, v in limit_offset_options],
         value=curr_limit_offset_str,
-        on_change=None # Attached below after switch handlers are defined
+        on_change=trigger_autosave_instant
     )
     
     # Segment toggles for Fixed vs Percent size
@@ -769,28 +764,9 @@ def build_settings_view(page: ft.Page, lang: str):
         page.update()
         trigger_autosave_instant()
 
-    def on_ai_limit_sw_change(e):
-        if use_ai_limit_sw.value:
-            limit_offset_dd.value = "ai"
-        else:
-            if limit_offset_dd.value == "ai":
-                limit_offset_dd.value = "1.0"
-        page.update()
-        trigger_autosave_instant()
-
-    def on_limit_offset_change(e):
-        if limit_offset_dd.value == "ai":
-            use_ai_limit_sw.value = True
-        else:
-            use_ai_limit_sw.value = False
-        page.update()
-        trigger_autosave_instant()
-
-    limit_offset_dd.on_change = on_limit_offset_change
-
     is_limit_active = (settings.get("use_limit_orders", 1) == 1)
     use_limit_sw = ft.Switch(value=is_limit_active, on_change=on_limit_change)
-    use_ai_limit_sw = ft.Switch(value=settings.get("use_ai_limit_price", 0) == 1, on_change=on_ai_limit_sw_change)
+    use_ai_limit_sw = ft.Switch(value=settings.get("use_ai_limit_price", 0) == 1, on_change=trigger_autosave_instant)
     use_ai_exit_sw = ft.Switch(value=settings.get("use_ai_exit", 0) == 1, on_change=trigger_autosave_instant)
     
     # Trailing Stop components
@@ -800,6 +776,11 @@ def build_settings_view(page: ft.Page, lang: str):
         trailing_activation_field.disabled = not is_active
         trailing_step_field.disabled = not is_active
         
+        # When trailing is enabled, standard AI TP/SL targets are disabled
+        use_ai_limit_sw.disabled = is_active
+        if is_active:
+            use_ai_limit_sw.value = False
+            
         if not is_active:
             use_ai_trailing_sw.value = False
         page.update()
@@ -812,6 +793,11 @@ def build_settings_view(page: ft.Page, lang: str):
     trailing_activation_field.disabled = not is_trailing_active
     trailing_step_field = make_textfield(value=str(settings.get("trailing_step_pct", 0.2)), width=80, on_change=trigger_autosave)
     trailing_step_field.disabled = not is_trailing_active
+    
+    # Initialize use_ai_limit_sw state based on trailing stop status
+    if is_trailing_active:
+        use_ai_limit_sw.disabled = True
+        use_ai_limit_sw.value = False
     
     # Risk limits
     loss_limit_field = make_textfield(label=t("daily_loss_limit_title", lang), value=str(settings.get("daily_loss_limit", 0)), on_change=trigger_autosave)
