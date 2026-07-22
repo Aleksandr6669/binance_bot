@@ -9,6 +9,9 @@ import db
 import trading_engine
 import flet_app
 
+# Глобальная настройка прокси для всех сетевых запросов при старте
+trading_engine.get_binance_proxies()
+
 def start_application():
     print("=== Инициализация базы данных... ===")
     db.init_db()

@@ -26,23 +26,37 @@ _user_buffers = {}
 _symbol_filters = {}
 
 def get_binance_proxies():
+    proxy = None
     try:
         settings = db.get_settings()
         if settings and settings.get("use_proxy") and settings.get("proxy_url"):
             proxy = settings["proxy_url"].strip()
-            return {
-                "http": proxy,
-                "https": proxy
-            }
     except Exception:
         pass
-    proxy = os.environ.get("BINANCE_PROXY")
+
+    if not proxy:
+        proxy = os.environ.get("BINANCE_PROXY") or os.environ.get("HTTP_PROXY") or os.environ.get("HTTPS_PROXY")
+
     if proxy:
+        proxy = proxy.strip()
+        # Устанавливаем системные переменные окружения, чтобы ВСЕ сетевые библиотеки
+        # (requests, httpx, urllib3 и т.д.) автоматически использовали этот прокси
+        os.environ["HTTP_PROXY"] = proxy
+        os.environ["HTTPS_PROXY"] = proxy
+        os.environ["http_proxy"] = proxy
+        os.environ["https_proxy"] = proxy
+        os.environ["ALL_PROXY"] = proxy
+        os.environ["all_proxy"] = proxy
         return {
             "http": proxy,
             "https": proxy
         }
-    return None
+    else:
+        # Если прокси выключен, сбрасываем системные переменные
+        for k in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"]:
+            if k in os.environ and k != "BINANCE_PROXY":
+                os.environ.pop(k, None)
+        return None
 
 # Кэш свечей и цен для ускорения запросов
 _klines_cache = {}

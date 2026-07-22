@@ -28,11 +28,8 @@ def fetch_symbols_background(market_type):
             "https://api.binance.us/api/v3/exchangeInfo" if use_us else "https://api.binance.com/api/v3/exchangeInfo"
         )
         import requests
-        proxies = None
-        settings = db.get_settings()
-        if settings and settings.get("use_proxy") == 1 and settings.get("proxy_url"):
-            p_url = settings.get("proxy_url").strip()
-            proxies = {"http": p_url, "https": p_url}
+        import trading_engine
+        proxies = trading_engine.get_binance_proxies()
         res = requests.get(url, timeout=5, proxies=proxies)
         if res.status_code == 200:
             data = res.json()
@@ -109,9 +106,18 @@ def build_settings_view(page: ft.Page, lang: str):
     # Get public IP for whitelist info box
     server_ip = "Unknown"
     try:
-        res = httpx.get("https://api.ipify.org?format=json", timeout=2)
-        if res.status_code == 200:
-            server_ip = res.json().get("ip", "Unknown")
+        import trading_engine
+        px = trading_engine.get_binance_proxies()
+        proxy_url = px.get("http") if px else None
+        if proxy_url:
+            with httpx.Client(proxy=proxy_url, timeout=5) as client:
+                res = client.get("https://api.ipify.org?format=json")
+                if res.status_code == 200:
+                    server_ip = res.json().get("ip", "Unknown")
+        else:
+            res = httpx.get("https://api.ipify.org?format=json", timeout=5)
+            if res.status_code == 200:
+                server_ip = res.json().get("ip", "Unknown")
     except Exception:
         pass
         
