@@ -104,13 +104,14 @@ def main(page: ft.Page):
             active_index = ROUTE_INDEX.get(page.route, 0)
             shell_view = build_layout(page, content, active_index, lang)
 
-            # Only append to views if not already there (avoids full re-render)
-            if not page.views or page.views[-1] is not shell_view:
-                page.views.clear()
-                page.views.append(shell_view)
+            page.views.clear()
+            page.views.append(shell_view)
 
         print("DEBUG route_change:", page.route, "views:", len(page.views))
-        page.update()
+        try:
+            page.update()
+        except Exception:
+            pass
 
         # Trigger lazy load tasks after transition has rendered
         if page.route == "/decisions" and hasattr(page, "load_decisions_data"):
@@ -149,7 +150,7 @@ def main(page: ft.Page):
     target_password = os.environ.get("APP_PASSWORD")
     if target_password and not getattr(page, "authenticated", False):
         page.route = "/login"
-    else:
+    elif not page.route or page.route == "/" or page.route == "":
         page.route = "/dashboard"
 
     handle_route_change(None)
