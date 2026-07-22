@@ -101,10 +101,11 @@ def build_dashboard_view(page: ft.Page, lang: str):
         except Exception as e:
             print(f"Error loading price/orders on dashboard: {e}")
 
-        # Рассчитаем нереализованный PNL активных ордеров
+        # Рассчитаем нереализованный PNL только для исполненных АКТИВНЫХ ордеров (status == "ACTIVE")
+        active_positions = [o for o in active_orders if str(o.get("status", "ACTIVE")).upper() == "ACTIVE"]
         unrealized_pnl = 0.0
-        if active_orders and current_price > 0:
-            for o in active_orders:
+        if active_positions and current_price > 0:
+            for o in active_positions:
                 amount = float(o["amount"])
                 entry = float(o["entry_price"])
                 side = o["side"]
@@ -126,7 +127,7 @@ def build_dashboard_view(page: ft.Page, lang: str):
         except Exception as e:
             print(f"Error fetching daily PNL: {e}")
 
-        # 2. Обновление балансов и Equity (Баланс + плавающий PnL)
+        # 2. Обновление балансов и Equity (Баланс + плавающий PnL только по ACTIVE позициям)
         balance_val = 0.0
         try:
             if is_live:
@@ -140,8 +141,8 @@ def build_dashboard_view(page: ft.Page, lang: str):
                 display_bal = balance_val + unrealized_pnl
                 balance_text.value = f"${display_bal:,.2f} USDT"
                 
-                # Рассчитаем задействованное обеспечение (размер ордера в USDT)
-                collateral_val = sum(float(o["size_usdt"]) for o in active_orders)
+                # Рассчитаем задействованное обеспечение только для реально открытых ордеров ACTIVE
+                collateral_val = sum(float(o["size_usdt"]) for o in active_positions)
                 collateral_text.value = f"{t('wallet_collateral', get_lang(page))}: ${collateral_val:,.2f} USDT"
         except Exception as e:
             print(f"Error fetching balances: {e}")
