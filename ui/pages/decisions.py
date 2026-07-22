@@ -175,7 +175,7 @@ def build_decisions_view(page: ft.Page, lang: str):
                 item_card = ft.Container(
                     content=ft.Column([
                         ft.Row([
-                            ft.Text(log['pair'], weight=ft.FontWeight.BOLD, size=12, color="#f8fafc"),
+                            ft.Text(log['pair'], weight=ft.FontWeight.BOLD, size=12, color="#f8fafc", no_wrap=True),
                             ft.Text(f"{action} ({prob*100:.1f}%)", color=action_color, weight=ft.FontWeight.BOLD, size=11, no_wrap=True),
                         ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                         ft.Row([
