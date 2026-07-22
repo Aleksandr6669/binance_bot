@@ -490,6 +490,39 @@ def get_filtered_analysis_logs(pair=None, date=None, tz_offset_min=180):
     conn.close()
     return [dict(row) for row in rows]
 
+def get_today_pnl(trading_mode="DEMO", tz_offset_min=180):
+    """
+    Рассчитывает суммарный PnL закрытых ордеров за ТЕКУЩИЙ ЛОКАЛЬНЫЙ ДЕНЬ пользователя
+    (от 00:00:00 до 23:59:59 по местному времени).
+    При наступлении новых суток по местному времени показатель автоматически обнуляется ($0.00).
+    """
+    import datetime as _dt
+    
+    offset_minutes = tz_offset_min if tz_offset_min is not None else 180
+    user_tz = _dt.timezone(_dt.timedelta(minutes=offset_minutes))
+    
+    now_user = _dt.datetime.now(_dt.timezone.utc).astimezone(user_tz)
+    local_today_start = _dt.datetime(now_user.year, now_user.month, now_user.day, 0, 0, 0, tzinfo=user_tz)
+    local_today_end = local_today_start + _dt.timedelta(days=1)
+    
+    utc_start = local_today_start.astimezone(_dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    utc_end = local_today_end.astimezone(_dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    
+    conn = get_db_connection()
+    row = conn.execute('''
+        SELECT SUM(pnl) as today_pnl 
+        FROM orders 
+        WHERE trading_mode = ? 
+          AND status != 'CANCELED' 
+          AND status != 'PENDING'
+          AND created_at >= ? AND created_at < ?
+    ''', (trading_mode, utc_start, utc_end)).fetchone()
+    conn.close()
+    
+    if row and row["today_pnl"] is not None:
+        return float(row["today_pnl"])
+    return 0.0
+
 def get_daily_pnl(trading_mode="DEMO"):
     conn = get_db_connection()
     rows = conn.execute('''

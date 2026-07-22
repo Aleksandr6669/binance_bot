@@ -114,18 +114,13 @@ def build_dashboard_view(page: ft.Page, lang: str):
                 else:
                     unrealized_pnl += amount * (entry - current_price)
 
-        # 3. Расчет сегодняшнего реализованного PnL
+        # 3. Расчет сегодняшнего реализованного PnL (автоматический сброс в 00:00 местного времени)
         realized_pnl = 0.0
         try:
-            daily_pnl = await asyncio.to_thread(db.get_daily_pnl, trading_mode=trading_mode)
-            if isinstance(daily_pnl, list):
-                today_str = datetime.now().strftime("%Y-%m-%d")
-                for row in daily_pnl:
-                    if row.get("day") == today_str:
-                        realized_pnl = float(row.get("total_pnl") or 0.0)
-                        break
+            tz_offset = getattr(page, "tz_offset", 180)
+            realized_pnl = await asyncio.to_thread(db.get_today_pnl, trading_mode=trading_mode, tz_offset_min=tz_offset)
         except Exception as e:
-            print(f"Error fetching daily PNL: {e}")
+            print(f"Error fetching today PNL: {e}")
 
         # 2. Обновление балансов и Equity (Баланс + плавающий PnL только по ACTIVE позициям)
         balance_val = 0.0
