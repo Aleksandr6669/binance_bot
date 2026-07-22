@@ -269,7 +269,7 @@ def delete_order(order_id):
 
 def activate_pending_order(order_id):
     conn = get_db_connection()
-    conn.execute("UPDATE orders SET status = 'ACTIVE' WHERE id = ?", (order_id,))
+    conn.execute("UPDATE orders SET status = 'ACTIVE', created_at = CURRENT_TIMESTAMP WHERE id = ?", (order_id,))
     conn.commit()
     conn.close()
     upload_db_to_hf_async()

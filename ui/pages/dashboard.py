@@ -526,13 +526,15 @@ def build_dashboard_view(page: ft.Page, lang: str):
                         try:
                             c_at = str(o.get("created_at", ""))
                             if c_at:
-                                act_dt = datetime.strptime(c_at, "%Y-%m-%d %H:%M:%S")
+                                act_dt = datetime.strptime(c_at, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
                                 act_ts = act_dt.timestamp()
                                 for idx, k in enumerate(chart_klines):
                                     k_ts = k[0] / 1000
-                                    if k_ts <= act_ts < k_ts + 60 or (idx == len(chart_klines) - 1 and act_ts >= k_ts):
+                                    if k_ts <= act_ts < k_ts + 60:
                                         act_x_index = idx
                                         break
+                                    elif act_ts >= k_ts + 60 and idx == len(chart_klines) - 1:
+                                        act_x_index = idx
                         except Exception:
                             act_x_index = 0
 
