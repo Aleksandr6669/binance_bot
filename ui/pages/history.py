@@ -126,14 +126,17 @@ def build_history_view(page: ft.Page, lang: str):
         if picker_control.value:
             dt = picker_control.value
             key, text_control, container = picker_control.user_data
-            formatted_date = f"{dt.year:04d}-{dt.month:02d}-{dt.day:02d}"
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=_dt_mod.timezone.utc)
+            local_dt = dt.astimezone(user_tz)
+            formatted_date = local_dt.strftime("%Y-%m-%d")
             filter_state[key] = formatted_date
             text_control.value = formatted_date
             text_control.color = "#f8fafc"
             container.update()
             run_apply(None)
 
-    init_dt = _dt_mod.datetime.strptime(today_str, "%Y-%m-%d").replace(hour=12, minute=0, second=0)
+    init_dt = _dt_mod.datetime.now(_dt_mod.timezone.utc).astimezone(user_tz).replace(hour=12, minute=0, second=0)
     open_start_picker = ft.DatePicker(value=init_dt, on_change=lambda e: set_date_and_apply(e.control))
     open_end_picker = ft.DatePicker(value=init_dt, on_change=lambda e: set_date_and_apply(e.control))
     close_start_picker = ft.DatePicker(value=init_dt, on_change=lambda e: set_date_and_apply(e.control))
@@ -153,7 +156,8 @@ def build_history_view(page: ft.Page, lang: str):
         def open_picker(e):
             if filter_state[key]:
                 try:
-                    picker.value = _dt_mod.datetime.strptime(filter_state[key], "%Y-%m-%d").replace(hour=12, minute=0, second=0)
+                    parsed = _dt_mod.datetime.strptime(filter_state[key], "%Y-%m-%d")
+                    picker.value = parsed.replace(hour=12, minute=0, second=0, tzinfo=user_tz)
                 except Exception:
                     pass
             picker.open = True

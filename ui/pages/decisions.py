@@ -381,21 +381,25 @@ def build_decisions_view(page: ft.Page, lang: str):
     def on_date_picked(e):
         if e.control.value:
             dt = e.control.value
-            formatted = f"{dt.year:04d}-{dt.month:02d}-{dt.day:02d}"
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=datetime.timezone.utc)
+            local_dt = dt.astimezone(user_tz)
+            formatted = local_dt.strftime("%Y-%m-%d")
             filter_state["date"] = formatted
             date_text.value = formatted
             date_text.color = "#f8fafc"
             date_container.update()
             run_apply()
 
-    init_dt = datetime.datetime.strptime(today_str, "%Y-%m-%d").replace(hour=12, minute=0, second=0)
+    init_dt = datetime.datetime.now(datetime.timezone.utc).astimezone(user_tz).replace(hour=12, minute=0, second=0)
     date_picker = ft.DatePicker(value=init_dt, on_change=on_date_picked)
     page.overlay.append(date_picker)
 
     def open_date_picker(e):
         if filter_state["date"]:
             try:
-                date_picker.value = datetime.datetime.strptime(filter_state["date"], "%Y-%m-%d").replace(hour=12, minute=0, second=0)
+                parsed = datetime.datetime.strptime(filter_state["date"], "%Y-%m-%d")
+                date_picker.value = parsed.replace(hour=12, minute=0, second=0, tzinfo=user_tz)
             except Exception:
                 pass
         date_picker.open = True
