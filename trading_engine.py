@@ -406,19 +406,27 @@ def place_scalping_order(pair, entry_price, trading_mode, size_usdt, market_type
 
     side = side.upper()
     settings_dict = dict(db.get_settings())
-    use_limit_orders = settings_dict.get("use_limit_orders", 1)
     use_ai_limit_price = settings_dict.get("use_ai_limit_price", 0)
 
-    if atr and atr > 0:
-        offset_tp = 4.0 * atr
-        offset_sl = 2.0 * atr
-    else:
-        offset_tp = entry_price * 0.006
-        offset_sl = entry_price * 0.003
+    if use_ai_limit_price and pred_change_1m is not None and abs(pred_change_1m) > 0:
+        # 🤖 ИИ сам вычисляет оптимальный отступ лимитного ордера на основе прогноза DLinear (1m)
+        predicted_move = entry_price * abs(pred_change_1m)
+        min_offset = entry_price * 0.0005  # минимум 0.05%
+        limit_offset = max(min_offset, predicted_move * 0.5)
 
-    # Calculate limit order offset based on user settings (default 1.0%)
-    limit_offset_pct = float(settings_dict.get("limit_offset_pct", 1.0) or 1.0)
-    limit_offset = entry_price * (limit_offset_pct / 100.0)
+        offset_tp = max(entry_price * 0.003, predicted_move * 2.0)
+        offset_sl = max(entry_price * 0.0015, predicted_move * 1.0)
+    else:
+        # ⚙️ Фиксированный процентный отступ из настроек пользователя (по умолчанию 1.0%)
+        limit_offset_pct = float(settings_dict.get("limit_offset_pct", 1.0) or 1.0)
+        limit_offset = entry_price * (limit_offset_pct / 100.0)
+
+        if atr and atr > 0:
+            offset_tp = 4.0 * atr
+            offset_sl = 2.0 * atr
+        else:
+            offset_tp = entry_price * 0.006
+            offset_sl = entry_price * 0.003
 
     # Decide order type based purely on user settings
     use_market = not bool(use_limit_orders)
