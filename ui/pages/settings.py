@@ -513,6 +513,12 @@ def build_settings_view(page: ft.Page, lang: str):
         mode_dd.disabled = False
     
     prob_options = [
+        ("0.00", "0% (Любой сигнал / Для теста)" if lang == "ru" else "0% (Any Signal / Test)"),
+        ("0.10", "10% (Ультра-тест)" if lang == "ru" else "10% (Ultra Test)"),
+        ("0.20", "20% (Максимально частая)" if lang == "ru" else "20% (Max Frequent)"),
+        ("0.30", "30% (Экстремально частая)" if lang == "ru" else "30% (Extreme Frequent)"),
+        ("0.40", "40% (Высокая частота)" if lang == "ru" else "40% (High Frequency)"),
+        ("0.50", "50% (Гипер-агрессивная)" if lang == "ru" else "50% (Hyper Aggressive)"),
         ("0.55", "55% (Агрессивная)" if lang == "ru" else "55% (Aggressive)"),
         ("0.60", "60% (Частая торговля)" if lang == "ru" else "60% (Active)"),
         ("0.65", "65% (Оптимальная)" if lang == "ru" else "65% (Recommended)"),
