@@ -406,6 +406,7 @@ def place_scalping_order(pair, entry_price, trading_mode, size_usdt, market_type
 
     side = side.upper()
     settings_dict = dict(db.get_settings())
+    use_limit_orders = settings_dict.get("use_limit_orders", 1)
     use_ai_limit_price = settings_dict.get("use_ai_limit_price", 0)
 
     if use_ai_limit_price and pred_change_1m is not None and abs(pred_change_1m) > 0:
