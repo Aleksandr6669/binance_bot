@@ -144,6 +144,15 @@ def init_db():
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     ''')
+
+    # Symbol Cache table to persist downloaded Binance trading pairs
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS symbol_cache (
+        market_type TEXT PRIMARY KEY,
+        symbols_json TEXT,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
     
     # Migration: check if close_price exists in orders table
     try:
@@ -490,3 +499,31 @@ def get_daily_pnl(trading_mode="DEMO"):
     ''', (trading_mode,)).fetchall()
     conn.close()
     return [dict(row) for row in rows]
+
+def save_cached_symbols(market_type, symbols):
+    try:
+        import json
+        conn = get_db_connection()
+        conn.execute(
+            "INSERT OR REPLACE INTO symbol_cache (market_type, symbols_json, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
+            (market_type.upper(), json.dumps(symbols))
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Error saving cached symbols to DB: {e}")
+
+def get_cached_symbols(market_type):
+    try:
+        import json
+        conn = get_db_connection()
+        row = conn.execute(
+            "SELECT symbols_json FROM symbol_cache WHERE market_type = ?",
+            (market_type.upper(),)
+        ).fetchone()
+        conn.close()
+        if row and row["symbols_json"]:
+            return json.loads(row["symbols_json"])
+    except Exception as e:
+        print(f"Error reading cached symbols from DB: {e}")
+    return None

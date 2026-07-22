@@ -39,7 +39,8 @@ def fetch_symbols_background(market_type):
             symbols.sort()
             with _symbols_lock:
                 _cached_symbols[market_type] = symbols
-            print(f"Loaded {len(symbols)} Binance symbols for {market_type}")
+            db.save_cached_symbols(market_type, symbols)
+            print(f"Loaded and saved {len(symbols)} Binance symbols to DB for {market_type}")
     except Exception as e:
         print(f"Error fetching symbols background for {market_type}: {e}")
     finally:
@@ -52,6 +53,17 @@ def get_binance_symbols(market_type):
     with _symbols_lock:
         if market_type in _cached_symbols and len(_cached_symbols[market_type]) > len(_fallback_symbols["SPOT"]):
             return _cached_symbols[market_type]
+        
+        # Try loading from persistent DB cache
+        db_symbols = db.get_cached_symbols(market_type)
+        if db_symbols and len(db_symbols) > len(_fallback_symbols["SPOT"]):
+            _cached_symbols[market_type] = db_symbols
+            # Trigger background refresh if not already fetching
+            if market_type not in _fetching_symbols:
+                _fetching_symbols.add(market_type)
+                threading.Thread(target=fetch_symbols_background, args=(market_type,), daemon=True).start()
+            return db_symbols
+
         if market_type not in _fetching_symbols:
             _fetching_symbols.add(market_type)
             threading.Thread(target=fetch_symbols_background, args=(market_type,), daemon=True).start()
