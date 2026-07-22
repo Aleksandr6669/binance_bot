@@ -397,17 +397,18 @@ def update_settings(key, value):
     finally:
         conn.close()
 
-def get_filtered_orders(pair=None, trading_mode=None, side=None, status=None, open_start=None, open_end=None, close_start=None, close_end=None, timeframe=None):
+def get_filtered_orders(pair=None, trading_mode=None, side=None, status=None, open_start=None, open_end=None, close_start=None, close_end=None, timeframe=None, tz_offset_min=180):
     """
-    Все даты — локальные ('YYYY-MM-DD'). Конвертируем в UTC для сравнения с created_at/closed_at (UTC).
+    Все даты — локальные ('YYYY-MM-DD'). Конвертируем в UTC для сравнения с created_at/closed_at (UTC) с учетом часового пояса пользователя.
     """
     import datetime as _dt
 
     def local_date_to_utc(date_str, end_of_day=False):
-        """Конвертирует локальную дату в UTC datetime строку."""
+        """Конвертирует локальную дату пользователя в UTC datetime строку."""
         try:
-            local_tz = _dt.datetime.now(_dt.timezone.utc).astimezone().tzinfo
-            d = _dt.datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=local_tz)
+            offset = tz_offset_min if tz_offset_min is not None else 180
+            user_tz = _dt.timezone(_dt.timedelta(minutes=offset))
+            d = _dt.datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=user_tz)
             if end_of_day:
                 d = d + _dt.timedelta(days=1)
             return d.astimezone(_dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")

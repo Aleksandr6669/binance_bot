@@ -239,7 +239,8 @@ def build_history_view(page: ft.Page, lang: str):
             open_start=filter_state["open_start"] if filter_state["open_start"] else None,
             open_end=filter_state["open_end"] if filter_state["open_end"] else None,
             close_start=filter_state["close_start"] if filter_state["close_start"] else None,
-            close_end=filter_state["close_end"] if filter_state["close_end"] else None
+            close_end=filter_state["close_end"] if filter_state["close_end"] else None,
+            tz_offset_min=tz_offset
         )
         
         history_list.controls.clear()

@@ -535,27 +535,17 @@ def build_dashboard_view(page: ft.Page, lang: str):
                         except Exception:
                             act_x_index = 0
 
-                        # 1. Линия входа (от точки активации вправо)
+                        # 1. Линия входа по всей ширине графика (от 0 до max_chart_x)
                         series_list.append(
                             ftc.LineChartData(
-                                points=[ftc.LineChartDataPoint(act_x_index, entry), ftc.LineChartDataPoint(max_chart_x, entry)],
+                                points=[ftc.LineChartDataPoint(0, entry), ftc.LineChartDataPoint(max_chart_x, entry)],
                                 stroke_width=1.5,
                                 color="#38bdf8",
                                 dash_pattern=[5, 5]
                             )
                         )
 
-                        # 2. Вертикальная пунктирная линия активации (от осей до точки входа)
-                        series_list.append(
-                            ftc.LineChartData(
-                                points=[ftc.LineChartDataPoint(act_x_index, min_y_val), ftc.LineChartDataPoint(act_x_index, entry)],
-                                stroke_width=1.5,
-                                color=marker_color,
-                                dash_pattern=[2, 2]
-                            )
-                        )
-
-                        # 3. ТОЧКА АКТИВАЦИИ (Яркий кружок ТОЛЬКО при сработавшем ордере ACTIVE)
+                        # 2. ТОЧКА АКТИВАЦИИ (Яркий кружок на месте входа при сработавшем ордере ACTIVE)
                         series_list.append(
                             ftc.LineChartData(
                                 points=[ftc.LineChartDataPoint(act_x_index, entry)],
@@ -569,7 +559,7 @@ def build_dashboard_view(page: ft.Page, lang: str):
                             tp = float(o["take_profit"])
                             series_list.append(
                                 ftc.LineChartData(
-                                    points=[ftc.LineChartDataPoint(act_x_index, tp), ftc.LineChartDataPoint(max_chart_x, tp)],
+                                    points=[ftc.LineChartDataPoint(0, tp), ftc.LineChartDataPoint(max_chart_x, tp)],
                                     stroke_width=1,
                                     color="#10b981",
                                     dash_pattern=[3, 3]
@@ -580,7 +570,7 @@ def build_dashboard_view(page: ft.Page, lang: str):
                             sl = float(o["stop_loss"])
                             series_list.append(
                                 ftc.LineChartData(
-                                    points=[ftc.LineChartDataPoint(act_x_index, sl), ftc.LineChartDataPoint(max_chart_x, sl)],
+                                    points=[ftc.LineChartDataPoint(0, sl), ftc.LineChartDataPoint(max_chart_x, sl)],
                                     stroke_width=1,
                                     color="#ef4444",
                                     dash_pattern=[3, 3]
