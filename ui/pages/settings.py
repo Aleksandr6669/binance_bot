@@ -257,7 +257,8 @@ def build_settings_view(page: ft.Page, lang: str):
         active_color="#0284c7"
     )
     proxy_url_field = make_textfield(
-        label="Proxy URL (http://user:pass@ip:port)",
+        label="PROXY URL",
+        hint_text="http://user:pass@ip:port",
         value=user_info.get("proxy_url") or "",
         on_change=trigger_autosave
     )

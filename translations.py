@@ -215,8 +215,8 @@ TRANSLATIONS = {
 
         # New localized keys
         "server_ip_notice": "IP-адрес сервера для Binance API Whitelist: {ip}",
-        "use_proxy": "Использовать прокси (Use Proxy)",
-        "classifier_threshold": "ПОРОГ УВЕРЕННОСТИ КЛАССИФИКАТОРА (CLASSIFIER CONFIDENCE THRESHOLD)",
+        "use_proxy": "Использовать прокси",
+        "classifier_threshold": "ПОРОГ УВЕРЕННОСТИ КЛАССИФИКАТОРА",
         "pos_size_pct": "% от баланса",
         "pos_size_label_fixed": "Размер позиции (USDT)",
         "pos_size_label_pct": "Размер позиции (% от баланса)",
@@ -366,8 +366,8 @@ TRANSLATIONS = {
 
         # New localized keys
         "server_ip_notice": "IP-адреса сервера для Binance API Whitelist: {ip}",
-        "use_proxy": "Використовувати проксі (Use Proxy)",
-        "classifier_threshold": "ПОРІГ ВПЕВНЕНОСТІ КЛАСИФІКАТОРА (CLASSIFIER CONFIDENCE THRESHOLD)",
+        "use_proxy": "Використовувати проксі",
+        "classifier_threshold": "ПОРІГ ВПЕВНЕНОСТІ КЛАСИФІКАТОРА",
         "pos_size_pct": "% від балансу",
         "pos_size_label_fixed": "Розмір позиції (USDT)",
         "pos_size_label_pct": "Розмір позиції (% від балансу)",
