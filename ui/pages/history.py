@@ -133,7 +133,7 @@ def build_history_view(page: ft.Page, lang: str):
             container.update()
             run_apply(None)
 
-    init_dt = _dt_mod.datetime.strptime(today_str, "%Y-%m-%d")
+    init_dt = _dt_mod.datetime.strptime(today_str, "%Y-%m-%d").replace(hour=12, minute=0, second=0)
     open_start_picker = ft.DatePicker(value=init_dt, on_change=lambda e: set_date_and_apply(e.control))
     open_end_picker = ft.DatePicker(value=init_dt, on_change=lambda e: set_date_and_apply(e.control))
     close_start_picker = ft.DatePicker(value=init_dt, on_change=lambda e: set_date_and_apply(e.control))
@@ -153,7 +153,7 @@ def build_history_view(page: ft.Page, lang: str):
         def open_picker(e):
             if filter_state[key]:
                 try:
-                    picker.value = _dt_mod.datetime.strptime(filter_state[key], "%Y-%m-%d")
+                    picker.value = _dt_mod.datetime.strptime(filter_state[key], "%Y-%m-%d").replace(hour=12, minute=0, second=0)
                 except Exception:
                     pass
             picker.open = True
