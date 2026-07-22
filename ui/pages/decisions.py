@@ -8,16 +8,24 @@ from ui.i18n import t
 from ui.layout import build_layout
 from ui.helpers import make_textfield
 
-def to_local_time(ts_str):
+def to_local_time(ts_str, tz_offset_min=180):
     if not ts_str:
         return "—"
     try:
         utc_dt = datetime.datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=datetime.timezone.utc)
-        return utc_dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        if tz_offset_min is not None:
+            user_tz = datetime.timezone(datetime.timedelta(minutes=tz_offset_min))
+            return utc_dt.astimezone(user_tz).strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            return utc_dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
     except Exception:
         return ts_str
 
 def build_decisions_view(page: ft.Page, lang: str):
+    tz_offset = getattr(page, "tz_offset", 180)
+    user_tz = datetime.timezone(datetime.timedelta(minutes=tz_offset))
+    today_str = datetime.datetime.now(datetime.timezone.utc).astimezone(user_tz).strftime("%Y-%m-%d")
+
     t_title_label = t("nav_decisions", lang)
     t_loading_decisions = t("loading_decisions", lang)
     t_waiting_list = t("waiting_list", lang)
@@ -64,9 +72,7 @@ def build_decisions_view(page: ft.Page, lang: str):
         expand=True
     )
 
-    today_str = datetime.date.today().strftime("%Y-%m-%d")
-
-    # Filter state — single date (today by default)
+    # Filter state — single date (today by default in user's local timezone)
     filter_state = {
         "pair": "",
         "date": today_str,
@@ -174,7 +180,7 @@ def build_decisions_view(page: ft.Page, lang: str):
                         ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                         ft.Row([
                             ft.Icon(ft.Icons.ACCESS_TIME_ROUNDED, size=11, color="#64748b"),
-                            ft.Text(to_local_time(log['created_at']), size=10, color="#64748b")
+                            ft.Text(to_local_time(log['created_at'], tz_offset), size=10, color="#64748b")
                         ], spacing=4)
                     ], spacing=6),
                     bgcolor=ft.Colors.with_opacity(0.05, "#ffffff") if not is_selected else ft.Colors.with_opacity(0.12, "#ffffff"),
@@ -243,7 +249,7 @@ def build_decisions_view(page: ft.Page, lang: str):
             ft.Row([
                 ft.Column([
                     ft.Text(selected_log["pair"], size=22, weight=ft.FontWeight.BOLD, color="#f8fafc"),
-                    ft.Text(t("log_created", lang, time=to_local_time(selected_log['created_at'])), size=12, color="#64748b")
+                    ft.Text(t("log_created", lang, time=to_local_time(selected_log['created_at'], tz_offset)), size=12, color="#64748b")
                 ], spacing=4),
                 ft.Column([
                     ft.Text("DECISION SIGNAL", size=10, color="#64748b", weight=ft.FontWeight.BOLD),
@@ -336,7 +342,7 @@ def build_decisions_view(page: ft.Page, lang: str):
 
         import asyncio
         # Загружаем данные в фоновом потоке, не блокируя UI
-        logs = await asyncio.to_thread(db.get_filtered_analysis_logs, date=filter_state["date"] or None)
+        logs = await asyncio.to_thread(db.get_filtered_analysis_logs, pair=None, date=filter_state["date"] or None, tz_offset_min=tz_offset)
         
         pair_query = (filter_state["pair"] or "").strip().upper()
         filtered_logs = []
@@ -463,7 +469,7 @@ def build_decisions_view(page: ft.Page, lang: str):
                 continue
             
             try:
-                logs = await asyncio.to_thread(db.get_filtered_analysis_logs, date=filter_state["date"] or None)
+                logs = await asyncio.to_thread(db.get_filtered_analysis_logs, pair=None, date=filter_state["date"] or None, tz_offset_min=tz_offset)
                 if page.route != "/decisions":
                     continue
 
@@ -501,7 +507,7 @@ def build_decisions_view(page: ft.Page, lang: str):
                                 ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                                 ft.Row([
                                     ft.Icon(ft.Icons.ACCESS_TIME_ROUNDED, size=11, color="#64748b"),
-                                    ft.Text(to_local_time(log['created_at']), size=10, color="#64748b")
+                                    ft.Text(to_local_time(log['created_at'], tz_offset), size=10, color="#64748b")
                                 ], spacing=4)
                             ], spacing=6),
                             bgcolor=ft.Colors.with_opacity(0.05, "#ffffff") if not is_sel else ft.Colors.with_opacity(0.12, "#ffffff"),

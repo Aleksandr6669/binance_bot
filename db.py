@@ -442,10 +442,11 @@ def get_filtered_orders(pair=None, trading_mode=None, side=None, status=None, op
     conn.close()
     return [dict(row) for row in rows]
 
-def get_filtered_analysis_logs(pair=None, date=None):
+def get_filtered_analysis_logs(pair=None, date=None, tz_offset_min=180):
     """
     date: локальная дата пользователя 'YYYY-MM-DD'.
-    Конвертируется в UTC-диапазон для корректной фильтрации (created_at хранится в UTC).
+    tz_offset_min: смещение часового пояса клиента в минутах от UTC (например 180 для UTC+3 MSK).
+    Конвертирует локальную дату пользователя в точный UTC-диапазон для базы данных.
     """
     import datetime
     query = "SELECT * FROM analysis_logs WHERE 1=1"
@@ -456,8 +457,12 @@ def get_filtered_analysis_logs(pair=None, date=None):
         params.append(pair)
     if date:
         try:
-            local_tz = datetime.datetime.now(datetime.timezone.utc).astimezone().tzinfo
-            local_start = datetime.datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=local_tz)
+            if tz_offset_min is not None:
+                user_tz = datetime.timezone(datetime.timedelta(minutes=tz_offset_min))
+            else:
+                user_tz = datetime.datetime.now(datetime.timezone.utc).astimezone().tzinfo or datetime.timezone.utc
+            
+            local_start = datetime.datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=user_tz)
             local_end = local_start + datetime.timedelta(days=1)
             utc_start = local_start.astimezone(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
             utc_end = local_end.astimezone(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")

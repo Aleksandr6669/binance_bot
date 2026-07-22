@@ -15,7 +15,12 @@ def main(page: ft.Page):
     page.title = "Nexus AI - Trading Terminal"
     page.theme_mode = ft.ThemeMode.DARK
     page.bgcolor = BG_COLOR
-    page.padding = 0
+    try:
+        import time
+        system_offset = int(-time.timezone / 60) if hasattr(time, "timezone") and time.timezone != 0 else 180
+        page.tz_offset = system_offset
+    except Exception:
+        page.tz_offset = 180
 
     try:
         if hasattr(page, "window"):

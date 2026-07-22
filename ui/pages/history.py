@@ -8,17 +8,25 @@ from ui.layout import build_layout
 
 from ui.helpers import make_textfield, make_dropdown
 
-def utc_to_local(ts_str):
+def utc_to_local(ts_str, tz_offset_min=180):
     """Конвертирует UTC timestamp из БД в локальное время для отображения."""
     if not ts_str:
         return "—"
     try:
         utc_dt = _dt_mod.datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=_dt_mod.timezone.utc)
-        return utc_dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        if tz_offset_min is not None:
+            user_tz = _dt_mod.timezone(_dt_mod.timedelta(minutes=tz_offset_min))
+            return utc_dt.astimezone(user_tz).strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            return utc_dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
     except Exception:
         return ts_str
 
 def build_history_view(page: ft.Page, lang: str):
+    tz_offset = getattr(page, "tz_offset", 180)
+    user_tz = _dt_mod.timezone(_dt_mod.timedelta(minutes=tz_offset))
+    today_str = _dt_mod.datetime.now(_dt_mod.timezone.utc).astimezone(user_tz).strftime("%Y-%m-%d")
+
     rendered_order_controls = {}
     t_loading = t("loading_orders", lang)
     t_no_trades = t("no_trades", lang)
@@ -45,9 +53,6 @@ def build_history_view(page: ft.Page, lang: str):
     
     def run_apply(e):
         page.run_task(apply_filters, None)
-
-    import datetime
-    today_str = datetime.date.today().strftime("%Y-%m-%d")
 
     # State variables for date ranges - по умолчанию сегодняшний день
     filter_state = {
