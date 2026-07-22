@@ -1140,8 +1140,9 @@ def evaluate_market_signal(persist_log=False, place_order=False):
         vol_blocked = current_atr > 4.0 * mean_hourly_atr
 
         trend_direction = "UP"
+        trend_tf = "5m" if timeframe == "1m" else timeframe
         try:
-            klines_trend = fetch_binance_klines(pair, timeframe, limit=500, market_type=market_type)
+            klines_trend = fetch_binance_klines(pair, trend_tf, limit=500, market_type=market_type)
             if len(klines_trend) >= 50:
                 closes_trend = pd.Series([float(k[4]) for k in klines_trend])
                 ema_50 = closes_trend.ewm(span=50, adjust=False).mean().iloc[-1]
@@ -1189,7 +1190,7 @@ def evaluate_market_signal(persist_log=False, place_order=False):
         ]])
 
         prob = float(scalping_ensemble.classifier_model.predict(features)[0])
-        threshold = float(dict(settings).get("min_probability_threshold", 0.88) or 0.88)
+        threshold = float(dict(settings).get("min_probability_threshold", 0.65) or 0.65)
         invert_signal = bool(dict(settings).get("invert_signal", 0))
 
         action = "HOLD"
@@ -1215,7 +1216,8 @@ def evaluate_market_signal(persist_log=False, place_order=False):
             reason += " Сигнал инвертирован"
 
         indicators_str = f"RSI: {current_rsi_norm * 100:.1f}, ATR%: {current_atr_pct * 100:.4f}%, Trend: {trend_direction}"
-        stage1_out = f"{timeframe} Scalping Analysis.\nVolatility Filter: {'BLOCKED' if vol_blocked else 'OK'}\nHourly Average ATR: {mean_hourly_atr:.4f}\nCurrent ATR: {current_atr:.4f}\nEMA 50 ({timeframe}) Trend Filter: {trend_direction}"
+        trend_desc = f"EMA 50 ({trend_tf} MTF)" if timeframe == "1m" else f"EMA 50 ({timeframe})"
+        stage1_out = f"{timeframe} Scalping Analysis.\nVolatility Filter: {'BLOCKED' if vol_blocked else 'OK'}\nHourly Average ATR: {mean_hourly_atr:.4f}\nCurrent ATR: {current_atr:.4f}\n{trend_desc} Trend Filter: {trend_direction}"
         stage2_out = f"DLinear Predictions:\n- t+1 Close Change: {pred_change_1m * 100:+.4f}%\n- t+2 Close Change: {pred_change_2m * 100:+.4f}%\n\nClassifier Success Probability: {prob * 100:.2f}%"
 
         settings_dict = dict(db.get_settings())

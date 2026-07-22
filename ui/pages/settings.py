@@ -492,15 +492,27 @@ def build_settings_view(page: ft.Page, lang: str):
         mode_dd.disabled = False
     
     prob_options = [
-        ("0.85", "85%"),
-        ("0.88", t("prob_88", lang)),
-        ("0.90", t("prob_90", lang))
+        ("0.55", "55% (Агрессивная)" if lang == "ru" else "55% (Aggressive)"),
+        ("0.60", "60% (Частая торговля)" if lang == "ru" else "60% (Active)"),
+        ("0.65", "65% (Оптимальная)" if lang == "ru" else "65% (Recommended)"),
+        ("0.70", "70% (Сбалансированная)" if lang == "ru" else "70% (Balanced)"),
+        ("0.75", "75% (Умеренная)" if lang == "ru" else "75% (Moderate)"),
+        ("0.80", "80% (Повышенная)" if lang == "ru" else "80% (High Confidence)"),
+        ("0.85", "85% (Строгая)" if lang == "ru" else "85% (Strict)"),
+        ("0.88", "88% (Высокая строжайшая)" if lang == "ru" else "88% (Very Strict)"),
+        ("0.90", "90% (Максимально строгая)" if lang == "ru" else "90% (Max Strict)")
     ]
+
+    curr_prob_val = settings.get("min_probability_threshold", 0.65)
+    if isinstance(curr_prob_val, (int, float)):
+        curr_prob_str = f"{curr_prob_val:.2f}"
+    else:
+        curr_prob_str = str(curr_prob_val)
 
     prob_field = make_dropdown(
         label=t("classifier_threshold", lang),
         options=[ft.dropdown.Option(k, v) for k, v in prob_options],
-        value=f"{settings.get('min_probability_threshold', 0.88):.2f}" if isinstance(settings.get('min_probability_threshold', 0.88), float) else str(settings.get('min_probability_threshold', 0.88)),
+        value=curr_prob_str,
         on_change=trigger_autosave_instant
     )
     

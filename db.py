@@ -44,7 +44,7 @@ def init_db():
         futures_leverage INTEGER DEFAULT 10,
         ui_language TEXT DEFAULT 'RU',
         ui_auto_center INTEGER DEFAULT 1,
-        min_probability_threshold REAL DEFAULT 0.88,
+        min_probability_threshold REAL DEFAULT 0.65,
         bot_started_at TEXT,
         invert_signal INTEGER DEFAULT 0,
         use_limit_orders INTEGER DEFAULT 1,
