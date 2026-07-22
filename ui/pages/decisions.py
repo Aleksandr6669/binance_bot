@@ -1,88 +1,567 @@
 import flet as ft
 import db
 import json
+import datetime
 from ui.theme import *
+from ui.styles import *
 from ui.i18n import t
 from ui.layout import build_layout
+from ui.helpers import make_textfield
+
+def to_local_time(ts_str):
+    if not ts_str:
+        return "—"
+    try:
+        utc_dt = datetime.datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=datetime.timezone.utc)
+        return utc_dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return ts_str
 
 def build_decisions_view(page: ft.Page, lang: str):
-    user_id = page.session.store.get("user_id")
-    decisions_list = ft.Column(spacing=12, scroll=ft.ScrollMode.ADAPTIVE, expand=True)
+    t_title_label = t("nav_decisions", lang)
+    t_loading_decisions = t("loading_decisions", lang)
+    t_waiting_list = t("waiting_list", lang)
+    t_no_logs = t("no_logs_found", lang)
+    t_search_hint = t("search_hint", lang)
+    t_select_prompt_1 = t("select_prompt_1", lang)
+    t_select_prompt_2 = t("select_prompt_2", lang)
+    t_loading_details = t("loading_details", lang)
+    t_s1_title = t("s1_detail_title", lang)
+    t_s2_title = t("s2_detail_title", lang)
+    t_s3_title = t("s3_detail_title", lang)
+
+    decisions_list = ft.Column(
+        controls=[
+            ft.Container(
+                content=ft.Column([
+                    ft.ProgressRing(color="#a78bfa"),
+                    ft.Text(t_loading_decisions, color="#94a3b8", size=12)
+                ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10),
+                alignment=ft.alignment.Alignment(0, 0),
+                padding=ft.Padding(0, 40, 0, 40),
+                expand=True
+            )
+        ],
+        spacing=10,
+        scroll=ft.ScrollMode.ADAPTIVE,
+        expand=True
+    )
     
-    async def load_decisions():
-        logs = db.get_all_analysis_logs(user_id)
-        decisions_list.controls.clear()
-        if not logs:
-            decisions_list.controls.append(ft.Text("Логи анализа отсутствуют.", color="#94a3b8"))
-        else:
-            for log in logs[:30]:  # Показываем последние 30 записей
-                s3 = {}
+    detail_panel = ft.Column(
+        controls=[
+            ft.Container(
+                content=ft.Column([
+                    ft.ProgressRing(color="#a78bfa"),
+                    ft.Text(t_waiting_list, color="#94a3b8", size=12)
+                ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10),
+                alignment=ft.alignment.Alignment(0, 0),
+                padding=ft.Padding(0, 40, 0, 0),
+                expand=True
+            )
+        ],
+        spacing=15,
+        scroll=ft.ScrollMode.ADAPTIVE,
+        expand=True
+    )
+
+    today_str = datetime.date.today().strftime("%Y-%m-%d")
+
+    # Filter state — single date (today by default)
+    filter_state = {
+        "pair": "",
+        "date": today_str,
+    }
+
+    # State tracking
+    state = {
+        "logs": [],
+        "selected_id": None
+    }
+    rendered_log_ids = set()
+
+    def try_parse_json(text):
+        if not text:
+            return {}
+        try:
+            return json.loads(text)
+        except:
+            try:
+                cleaned = text.replace("'", '"')
+                return json.loads(cleaned)
+            except:
+                return {}
+
+    def render_json_properties(data):
+        if not isinstance(data, dict):
+            return ft.Text(str(data), size=12, color="#cbd5e1")
+
+        rows = []
+        for k, v in data.items():
+            label_text = k.replace("_", " ").upper()
+            val_text = str(v)
+            if isinstance(v, float):
+                val_text = f"{v:.4f}"
+            rows.append(
+                ft.Row([
+                    ft.Text(f"{label_text}:", size=11, color="#64748b", weight=ft.FontWeight.BOLD, width=150),
+                    ft.Text(val_text, size=12, color="#f8fafc", weight=ft.FontWeight.BOLD)
+                ], spacing=10)
+            )
+        return ft.Column(rows, spacing=6)
+
+    def select_log(log_id):
+        page.run_task(select_log_async, log_id)
+
+    async def select_log_async(log_id):
+        # 1. Мгновенно обновляем выбранный ID
+        state["selected_id"] = log_id
+        
+        # 2. Мгновенно подсвечиваем выбранный элемент в списке слева
+        render_list()
+        
+        # 3. И одновременно мгновенно показываем шапку лога с загрузочным спиннером ниже нее
+        render_details(only_header=True)
+
+        # 4. Даем браузеру гарантированно отрисовать подсветку, шапку и спиннер
+        import asyncio
+        await asyncio.sleep(0.1)
+
+        # 5. И только теперь загружаем и строим детальные карточки STAGE 1, 2, 3
+        render_details(only_header=False)
+
+    def render_list():
+        has_loader = False
+        if len(decisions_list.controls) == 1:
+            first_ctrl = decisions_list.controls[0]
+            if isinstance(first_ctrl, ft.Container) and hasattr(first_ctrl, "content") and isinstance(first_ctrl.content, ft.Column):
+                has_loader = True
+
+        if len(decisions_list.controls) != len(state["logs"]) or has_loader:
+            decisions_list.controls.clear()
+            rendered_log_ids.clear()
+            if not state["logs"]:
+                decisions_list.controls.append(
+                    ft.Container(
+                        content=ft.Column([
+                            ft.Icon(ft.Icons.AUTO_AWESOME_ROUNDED, size=32, color="#64748b"),
+                            ft.Text(t_no_logs, color="#94a3b8", size=12, weight=ft.FontWeight.W_500),
+                        ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=6),
+                        alignment=ft.alignment.Alignment(0, 0),
+                        padding=ft.Padding(0, 40, 0, 40)
+                    )
+                )
                 try:
-                    s3 = json.loads(log["stage3_output"])
+                    decisions_list.update()
                 except:
                     pass
-                
+                return
+
+            for log in state["logs"]:
+                is_selected = (log["id"] == state["selected_id"])
+                s3 = try_parse_json(log.get("stage3_output"))
                 action = s3.get("action", "HOLD")
                 prob = s3.get("probability", 0.0)
-                reason = s3.get("reason", "No details")
-                
                 action_color = "#38bdf8" if action == "HOLD" else ("#10b981" if "BUY" in action else "#ef4444")
-                
-                card = ft.Container(
-                    content=ft.Column(
-                        [
-                            ft.Row(
-                                [
-                                    ft.Text(f"{log['pair']}", weight=ft.FontWeight.BOLD, size=15),
-                                    ft.Text(f"Action: {action} (Prob: {prob*100:.1f}%)", color=action_color, weight=ft.FontWeight.BOLD, size=13),
-                                ],
-                                alignment=ft.MainAxisAlignment.SPACE_BETWEEN
-                            ),
-                            ft.Text(f"Reason: {reason}", size=13, color="#e2e8f0"),
-                            ft.ExpansionTile(
-                                title=ft.Text("Detailed Pipeline Output", size=11, color="#64748b"),
-                                controls=[
-                                    ft.Container(
-                                        content=ft.Column(
-                                            [
-                                                ft.Text("Stage 1 Sentiment:", size=11, color="#38bdf8", weight=ft.FontWeight.BOLD),
-                                                ft.Text(log["stage1_output"], size=11, color="#cbd5e1"),
-                                                ft.Text("Stage 2 Planner:", size=11, color="#fbbf24", weight=ft.FontWeight.BOLD),
-                                                ft.Text(log["stage2_output"], size=11, color="#cbd5e1"),
-                                                ft.Text("Stage 3 Execution:", size=11, color="#f43f5e", weight=ft.FontWeight.BOLD),
-                                                ft.Text(log["stage3_output"], size=11, color="#cbd5e1"),
-                                            ],
-                                            spacing=5
-                                        ),
-                                        padding=10,
-                                        bgcolor=BG_COLOR,
-                                        border_radius=6
-                                    )
-                                ]
-                            ),
-                            ft.Text(f"Timestamp: {log['created_at']}", size=11, color="#64748b")
-                        ],
-                        spacing=8
-                    ),
-                    bgcolor=CARD_COLOR,
-                    border_radius=8,
-                    padding=12,
-                    border=ft.Border.all(1, "#334155")
-                )
-                decisions_list.controls.append(card)
-        await page.update()
 
-    layout = ft.Column(
+                def make_click_handler(lid):
+                    return lambda _: select_log(lid)
+
+                item_card = ft.Container(
+                    content=ft.Column([
+                        ft.Row([
+                            ft.Text(log['pair'], weight=ft.FontWeight.BOLD, size=13, color="#f8fafc"),
+                            ft.Text(f"{action} ({prob*100:.1f}%)", color=action_color, weight=ft.FontWeight.BOLD, size=12),
+                        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                        ft.Row([
+                            ft.Icon(ft.Icons.ACCESS_TIME_ROUNDED, size=11, color="#64748b"),
+                            ft.Text(to_local_time(log['created_at']), size=10, color="#64748b")
+                        ], spacing=4)
+                    ], spacing=6),
+                    bgcolor=ft.Colors.with_opacity(0.05, "#ffffff") if not is_selected else ft.Colors.with_opacity(0.12, "#ffffff"),
+                    blur=ft.Blur(10, 10, ft.BlurTileMode.MIRROR),
+                    border_radius=12,
+                    padding=ft.Padding(16, 12, 16, 12),
+                    border=ft.Border.all(
+                        1.5 if is_selected else 1, 
+                        "#0284c7" if is_selected else ft.Colors.with_opacity(0.1, "#ffffff")
+                    ),
+                    on_click=make_click_handler(log["id"])
+                )
+                decisions_list.controls.append(item_card)
+                rendered_log_ids.add(log["id"])
+        else:
+            # Быстро обновляем свойства существующих карточек
+            for idx, log in enumerate(state["logs"]):
+                is_selected = (log["id"] == state["selected_id"])
+                card = decisions_list.controls[idx]
+                card.bgcolor = ft.Colors.with_opacity(0.05, "#ffffff") if not is_selected else ft.Colors.with_opacity(0.12, "#ffffff")
+                card.border = ft.Border.all(
+                    1.5 if is_selected else 1, 
+                    "#0284c7" if is_selected else ft.Colors.with_opacity(0.1, "#ffffff")
+                )
+
+        try:
+            decisions_list.update()
+        except:
+            pass
+
+    def render_details(only_header=False):
+        selected_log = next((l for l in state["logs"] if l["id"] == state["selected_id"]), None)
+
+        if not selected_log:
+            if only_header:
+                detail_panel.controls.clear()
+                detail_panel.controls.append(
+                    ft.Container(
+                        content=ft.Column([
+                            ft.Icon(ft.Icons.PSYCHOLOGY_ROUNDED, size=64, color="#334155"),
+                            ft.Text(
+                                t_select_prompt_1,
+                                size=16, weight=ft.FontWeight.BOLD, color="#f8fafc",
+                                text_align=ft.TextAlign.CENTER
+                            ),
+                            ft.Text(
+                                t_select_prompt_2,
+                                size=12, color="#64748b", text_align=ft.TextAlign.CENTER
+                            )
+                        ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10),
+                        alignment=ft.alignment.Alignment(0, 0), expand=True
+                    )
+                )
+                try:
+                    detail_panel.update()
+                except:
+                    pass
+            return
+
+        s3 = try_parse_json(selected_log.get("stage3_output"))
+        action = s3.get("action", "HOLD")
+        prob = s3.get("probability", 0.0)
+        action_color = "#38bdf8" if action == "HOLD" else ("#10b981" if "BUY" in action else "#ef4444")
+
+        header_card = create_glass_card(
+            ft.Row([
+                ft.Column([
+                    ft.Text(selected_log["pair"], size=22, weight=ft.FontWeight.BOLD, color="#f8fafc"),
+                    ft.Text(t("log_created", lang, time=to_local_time(selected_log['created_at'])), size=12, color="#64748b")
+                ], spacing=4),
+                ft.Column([
+                    ft.Text("DECISION SIGNAL", size=10, color="#64748b", weight=ft.FontWeight.BOLD),
+                    ft.Text(f"{action} ({prob*100:.1f}%)", size=22, color=action_color, weight=ft.FontWeight.BOLD)
+                ], spacing=4, horizontal_alignment=ft.CrossAxisAlignment.END)
+            ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+            padding=15
+        )
+
+        if only_header:
+            detail_panel.controls.clear()
+            detail_panel.controls.append(header_card)
+            detail_panel.controls.append(
+                ft.Container(
+                    content=ft.Column([
+                        ft.ProgressRing(color=GOLD_COLOR, width=24, height=24),
+                        ft.Text(t_loading_details, color="#94a3b8", size=12)
+                    ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10),
+                    alignment=ft.alignment.Alignment(0, 0),
+                    padding=ft.Padding(0, 40, 0, 0),
+                    expand=True
+                )
+            )
+            try:
+                detail_panel.update()
+            except:
+                pass
+            return
+
+        # Если это полная отрисовка деталей, очищаем панель и строим всё заново
+        detail_panel.controls.clear()
+        detail_panel.controls.append(header_card)
+
+        s1 = try_parse_json(selected_log.get("stage1_output"))
+        s1_title = ft.Row([
+            ft.Icon(ft.Icons.ANALYTICS_ROUNDED, color="#38bdf8", size=18),
+            ft.Text(t_s1_title, size=13, weight=ft.FontWeight.BOLD, color="#38bdf8")
+        ], spacing=8)
+        s1_content = render_json_properties(s1) if s1 else ft.Text(selected_log.get("stage1_output", "N/A"), size=12, color="#cbd5e1")
+        detail_panel.controls.append(
+            create_glass_card(ft.Column([s1_title, ft.Divider(color="#1e293b", height=1), s1_content], spacing=10), padding=15)
+        )
+
+        s2 = try_parse_json(selected_log.get("stage2_output"))
+        s2_title = ft.Row([
+            ft.Icon(ft.Icons.QUERY_STATS_ROUNDED, color="#fbbf24", size=18),
+            ft.Text(t_s2_title, size=13, weight=ft.FontWeight.BOLD, color="#fbbf24")
+        ], spacing=8)
+        s2_content = render_json_properties(s2) if s2 else ft.Text(selected_log.get("stage2_output", "N/A"), size=12, color="#cbd5e1")
+        detail_panel.controls.append(
+            create_glass_card(ft.Column([s2_title, ft.Divider(color="#1e293b", height=1), s2_content], spacing=10), padding=15)
+        )
+
+        s3_title = ft.Row([
+            ft.Icon(ft.Icons.BOLT_ROUNDED, color="#f43f5e", size=18),
+            ft.Text(t_s3_title, size=13, weight=ft.FontWeight.BOLD, color="#f43f5e")
+        ], spacing=8)
+        s3_content = render_json_properties(s3) if s3 else ft.Text(selected_log.get("stage3_output", "N/A"), size=12, color="#cbd5e1")
+        detail_panel.controls.append(
+            create_glass_card(ft.Column([s3_title, ft.Divider(color="#1e293b", height=1), s3_content], spacing=10), padding=15)
+        )
+
+        try:
+            detail_panel.update()
+        except:
+            pass
+
+    # ---------- Filter logic ----------
+    def run_apply(e=None):
+        page.run_task(apply_filters)
+
+    async def apply_filters():
+        # Показываем красивый спиннер загрузки
+        decisions_list.controls.clear()
+        decisions_list.controls.append(
+            ft.Container(
+                content=ft.Column([
+                    ft.ProgressRing(color="#a78bfa"),
+                    ft.Text(t_loading_decisions, color="#94a3b8", size=12)
+                ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10),
+                alignment=ft.alignment.Alignment(0, 0),
+                padding=ft.Padding(0, 40, 0, 40),
+                expand=True
+            )
+        )
+        try:
+            decisions_list.update()
+        except:
+            pass
+
+        import asyncio
+        # Загружаем данные в фоновом потоке, не блокируя UI
+        logs = await asyncio.to_thread(db.get_filtered_analysis_logs, date=filter_state["date"] or None)
+        
+        pair_query = (filter_state["pair"] or "").strip().upper()
+        filtered_logs = []
+        for log in (logs or []):
+            if pair_query and pair_query not in (log.get("pair") or "").upper():
+                continue
+            # Display all decisions, including neutral (HOLD) signals
+            filtered_logs.append(log)
+        state["logs"] = filtered_logs
+        if state["logs"]:
+            state["selected_id"] = state["logs"][0]["id"]
+        else:
+            state["selected_id"] = None
+        render_list()
+        render_details(only_header=True)
+        await asyncio.sleep(0.1)
+        render_details(only_header=False)
+
+    # ---------- Pair search field ----------
+    pair_field = make_textfield(hint_text=t_search_hint, value="", on_change=run_apply)
+    pair_field.height = 48
+    pair_field.margin = ft.Margin.all(0)
+    pair_field.content_padding = ft.Padding(10, 14, 10, 14)
+    pair_field.text_size = 10
+    pair_field.expand = True
+
+    def on_pair_change(e):
+        filter_state["pair"] = pair_field.value or ""
+        run_apply()
+
+    pair_field.on_change = on_pair_change
+
+    # ---------- Single date picker ----------
+    date_text = ft.Text(filter_state["date"], size=10, color="#f8fafc")
+
+    def on_date_picked(e):
+        if e.control.value:
+            dt = e.control.value
+            # Convert to local timezone to prevent timezone-induced day shifts
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=datetime.timezone.utc)
+            local_dt = dt.astimezone()
+            
+            formatted = f"{local_dt.year:04d}-{local_dt.month:02d}-{local_dt.day:02d}"
+            filter_state["date"] = formatted
+            date_text.value = formatted
+            date_text.color = "#f8fafc"
+            date_container.update()
+            run_apply()
+
+    date_picker = ft.DatePicker(on_change=on_date_picked)
+    page.overlay.append(date_picker)
+
+    def open_date_picker(e):
+        date_picker.open = True
+        date_picker.update()
+
+    date_container = ft.Container(
+        content=ft.Row(
+            [ft.Icon(ft.Icons.CALENDAR_MONTH_ROUNDED, size=12, color="#94a3b8"), date_text],
+            spacing=3,
+            alignment=ft.MainAxisAlignment.CENTER
+        ),
+        border=ft.Border.all(1, ft.Colors.with_opacity(0.3, "#ffffff")),
+        border_radius=8,
+        padding=ft.Padding(6, 0, 6, 0),
+        on_click=open_date_picker,
+        bgcolor=ft.Colors.TRANSPARENT,
+        alignment=ft.alignment.Alignment(0, 0),
+        width=110,
+        height=48
+    )
+
+    filter_card = create_glass_card(
+        ft.Row([
+            pair_field,
+            ft.Container(width=1, height=16, bgcolor="#334155"),
+            date_container,
+        ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+        padding=10
+    )
+
+    # ---------- Left panel ----------
+    left_panel = ft.Column(
         [
-            ft.Text("AI Pipeline Decision History", size=20, weight=ft.FontWeight.BOLD, color="#f8fafc"),
+            ft.Text("AI Decision Logs", size=18, weight=ft.FontWeight.BOLD, color="#f8fafc"),
+            filter_card,
             ft.Divider(color="#334155"),
             decisions_list
+        ],
+        width=320,
+        expand=False,
+        spacing=10
+    )
+
+    # ---------- Right panel ----------
+    right_panel = ft.Column(
+        [
+            ft.Text("Pipeline Detailed Analysis", size=18, weight=ft.FontWeight.BOLD, color="#f8fafc"),
+            ft.Divider(color="#334155"),
+            detail_panel
+        ],
+        expand=True,
+        spacing=10
+    )
+
+    split_layout = ft.Row(
+        [
+            left_panel,
+            ft.Container(width=1, bgcolor="#334155", expand=False),
+            right_panel
         ],
         expand=True,
         spacing=15
     )
-    
-    page.run_task(load_decisions)
-    
-    return build_layout(page, layout, 2, lang)
 
+    page.load_decisions_data = apply_filters
+
+    async def decisions_refresher():
+        import asyncio
+        while True:
+            await asyncio.sleep(0.5)
+            if page.route != "/decisions":
+                continue
+            
+            try:
+                logs = await asyncio.to_thread(db.get_filtered_analysis_logs, date=filter_state["date"] or None)
+                if page.route != "/decisions":
+                    continue
+
+                pair_query = (filter_state["pair"] or "").strip().upper()
+                filtered_logs = []
+                for log in (logs or []):
+                    if pair_query and pair_query not in (log.get("pair") or "").upper():
+                        continue
+                    filtered_logs.append(log)
+
+                # Identify new logs that are not currently rendered
+                new_logs = [l for l in filtered_logs if l["id"] not in rendered_log_ids]
+                if new_logs:
+                    if not rendered_log_ids:
+                        decisions_list.controls.clear()
+
+                    newly_created_controls = []
+                    # Insert new logs at their correct positions
+                    # Since they are sorted DESC by created_at, new logs appear at their sorted position
+                    for log in reversed(new_logs): # Insert older new ones first, so the newest ends up at the top
+                        action_s3 = try_parse_json(log.get("stage3_output"))
+                        act = action_s3.get("action", "HOLD")
+                        prb = action_s3.get("probability", 0.0)
+                        act_color = "#38bdf8" if act == "HOLD" else ("#10b981" if "BUY" in act else "#ef4444")
+                        
+                        def make_click_handler(lid):
+                            return lambda _: select_log(lid)
+
+                        is_sel = (log["id"] == state["selected_id"])
+                        card = ft.Container(
+                            content=ft.Column([
+                                ft.Row([
+                                    ft.Text(log['pair'], weight=ft.FontWeight.BOLD, size=13, color="#f8fafc"),
+                                    ft.Text(f"{act} ({prb*100:.1f}%)", color=act_color, weight=ft.FontWeight.BOLD, size=12),
+                                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                                ft.Row([
+                                    ft.Icon(ft.Icons.ACCESS_TIME_ROUNDED, size=11, color="#64748b"),
+                                    ft.Text(to_local_time(log['created_at']), size=10, color="#64748b")
+                                ], spacing=4)
+                            ], spacing=6),
+                            bgcolor=ft.Colors.with_opacity(0.05, "#ffffff") if not is_sel else ft.Colors.with_opacity(0.12, "#ffffff"),
+                            blur=ft.Blur(10, 10, ft.BlurTileMode.MIRROR),
+                            border_radius=12,
+                            padding=ft.Padding(16, 12, 16, 12),
+                            border=ft.Border.all(
+                                1.5 if is_sel else 1, 
+                                "#0284c7" if is_sel else ft.Colors.with_opacity(0.1, "#ffffff")
+                            ),
+                            on_click=make_click_handler(log["id"]),
+                            opacity=0,
+                            scale=0.8,
+                            animate_opacity=ft.Animation(300, ft.AnimationCurve.EASE_OUT),
+                            animate_scale=ft.Animation(300, ft.AnimationCurve.EASE_OUT_BACK)
+                        )
+                        
+                        insert_idx = 0
+                        for el in state["logs"]:
+                            if log["created_at"] < el["created_at"]:
+                                insert_idx += 1
+                            else:
+                                break
+                                
+                        decisions_list.controls.insert(insert_idx, card)
+                        state["logs"].insert(insert_idx, log)
+                        rendered_log_ids.add(log["id"])
+                        newly_created_controls.append(card)
+
+                    # If previously selected_id was None, select the first new log
+                    if state["selected_id"] is None and state["logs"]:
+                        state["selected_id"] = state["logs"][0]["id"]
+                        # Re-highlight the selected item in the list
+                        for idx, el in enumerate(state["logs"]):
+                            is_selected = (el["id"] == state["selected_id"])
+                            c = decisions_list.controls[idx]
+                            c.bgcolor = ft.Colors.with_opacity(0.05, "#ffffff") if not is_selected else ft.Colors.with_opacity(0.12, "#ffffff")
+                            c.border = ft.Border.all(
+                                1.5 if is_selected else 1, 
+                                "#0284c7" if is_selected else ft.Colors.with_opacity(0.1, "#ffffff")
+                            )
+                        page.run_task(select_log_async, state["selected_id"])
+
+                    try:
+                        decisions_list.update()
+                    except:
+                        pass
+
+                    if newly_created_controls:
+                        await asyncio.sleep(0.05)
+                        for c in newly_created_controls:
+                            c.opacity = 1.0
+                            c.scale = 1.0
+                        try:
+                            decisions_list.update()
+                        except:
+                            pass
+            except Exception as e:
+                print(f"Decisions background refresher error: {e}")
+
+    page.run_task(decisions_refresher)
+
+    return split_layout

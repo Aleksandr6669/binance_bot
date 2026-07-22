@@ -21,31 +21,15 @@ from dotenv import load_dotenv
 # Загрузка переменных окружения из .env
 load_dotenv()
 
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-
-if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
-    logger.info("Telegram уведомления активированы для скальпера.")
-else:
-    logger.info("Глобальные Telegram уведомления в .env не заданы. Пользователи могут настроить своих ботов индивидуально в настройках профиля.")
-
-async def send_telegram_notification_async(message):
+async def send_notification_async(message):
     """
-    Асинхронно отправляет сообщение в Telegram, используя asyncio.to_thread,
-    чтобы не блокировать выполнение основного WebSocket-цикла.
+    Выводит уведомление в логгер (логирование событий терминала).
     """
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        return
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": message,
-        "parse_mode": "HTML"
-    }
-    try:
-        await asyncio.to_thread(requests.post, url, json=payload, timeout=10)
-    except Exception as e:
-        logger.error(f"Не удалось отправить уведомление в Telegram: {e}")
+    clean_msg = message.replace("<b>", "").replace("</b>", "").replace("🟢", "").replace("🔴", "").replace("🔵", "").replace("⚠️", "").replace("🚀", "")
+    logger.info(f"[NOTIFICATION] {clean_msg.strip()}")
+
+# Совместимость со старыми вызовами
+send_notification_async = send_notification_async
 
 # Динамическая проверка доступности PyTorch.
 # Если PyTorch недоступен (например, не скомпилирован под Python 3.14 на этой архитектуре),
@@ -225,25 +209,36 @@ class NumPyClassifier:
     def __init__(self, num_features=6):
         self.W = np.random.normal(0, 0.1, (num_features,))
         self.b = 0.0
+        self.mean = None
+        self.std = None
         
     def _sigmoid(self, z):
         return 1.0 / (1.0 + np.exp(-np.clip(z, -15, 15)))
         
     def predict(self, X):
         # X: (N, num_features) или (num_features,)
-        z = X @ self.W + self.b
+        X = np.array(X)
+        if self.mean is not None and self.std is not None:
+            X_scaled = (X - self.mean) / self.std
+        else:
+            X_scaled = X
+        z = X_scaled @ self.W + self.b
         return self._sigmoid(z)
         
     def fit(self, X, y, epochs=100, lr=0.1):
         # X: (N, num_features), y: (N,)
         X = np.array(X)
         y = np.array(y)
+        self.mean = np.mean(X, axis=0)
+        self.std = np.std(X, axis=0) + 1e-8
+        X_scaled = (X - self.mean) / self.std
+        
         for _ in range(epochs):
-            pred = self.predict(X)
+            pred = self._sigmoid(X_scaled @ self.W + self.b)
             err = pred - y
             
             # Вычисление градиентов
-            dW = (X.T @ err) / len(y)
+            dW = (X_scaled.T @ err) / len(y)
             db = np.mean(err)
             
             # Обновление параметров
@@ -262,9 +257,16 @@ class NumPyTrailingModel:
     def __init__(self, num_features=7):
         self.W = np.zeros((num_features,))
         self.b = 0.005  # Начинаем с отступа в 0.5% по умолчанию
+        self.mean = None
+        self.std = None
         
     def forward(self, X):
-        return X @ self.W + self.b
+        X = np.array(X)
+        if self.mean is not None and self.std is not None:
+            X_scaled = (X - self.mean) / self.std
+        else:
+            X_scaled = X
+        return X_scaled @ self.W + self.b
         
     def predict(self, X):
         # Ограничиваем отступ снизу 0.001 (0.1%) и сверху 0.05 (5.0%) для безопасности
@@ -279,24 +281,156 @@ class NumPyTrailingModel:
         N = len(y)
         if N == 0:
             return
+        self.mean = np.mean(X, axis=0)
+        self.std = np.std(X, axis=0) + 1e-8
+        X_scaled = (X - self.mean) / self.std
+        
         for _ in range(epochs):
-            pred = self.forward(X)
+            pred = X_scaled @ self.W + self.b
             err = pred - y
-            dW = (X.T @ err) / N
+            dW = (X_scaled.T @ err) / N
             db = np.mean(err)
             self.W -= lr * dW
             self.b -= lr * db
 
-# Глобальный инстанс модели трейлинга
-ai_trailing_model = NumPyTrailingModel(num_features=7)
+# Глобальные инстанции моделей
+dlinear_model = None
+classifier_model = None
+ai_trailing_model = NumPyTrailingModel(num_features=9)
+current_model_pair = None
+current_model_timeframe = None
+
+training_status = {
+    "active": False,
+    "pair": "",
+    "timeframe": "",
+    "started_at": 0.0
+}
 
 def predict_ai_trailing_distance(features):
     """
     Предсказывает волатильность (в процентах от цены) для настройки трейлинг-стопа.
-    features: np.array (1D с 7 признаками или 2D [1, 7])
+    features: np.array (1D с 9 признаками или 2D [1, 9])
     """
     global ai_trailing_model
     return float(ai_trailing_model.predict(features))
+
+import pickle
+import os
+
+def save_models_to_disk(pair, timeframe):
+    """Сохраняет обученные веса DLinear, классификатора, трейлинга и всю связанную историю из БД в pkl файл."""
+    global dlinear_model, classifier_model, ai_trailing_model
+    try:
+        os.makedirs("models", exist_ok=True)
+        filepath = f"models/{pair.upper()}_{timeframe}.pkl"
+        
+        # Загружаем связанные данные из SQLite для этой пары
+        orders = []
+        analysis_logs = []
+        market_candles = []
+        try:
+            import sqlite3
+            db_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading_bot.db")
+            if os.path.exists(db_file):
+                conn = sqlite3.connect(db_file)
+                conn.row_factory = sqlite3.Row
+                orders = [dict(row) for row in conn.execute("SELECT * FROM orders WHERE pair = ?", (pair.upper(),)).fetchall()]
+                analysis_logs = [dict(row) for row in conn.execute("SELECT * FROM analysis_logs WHERE pair = ?", (pair.upper(),)).fetchall()]
+                market_candles = [dict(row) for row in conn.execute("SELECT * FROM market_candles WHERE pair = ?", (pair.upper(),)).fetchall()]
+                conn.close()
+        except Exception as db_ex:
+            logger.warning(f"Не удалось загрузить историю из БД для экспорта: {db_ex}")
+
+        data = {
+            "dlinear": dlinear_model,
+            "classifier": classifier_model,
+            "trailing": ai_trailing_model,
+            "db_orders": orders,
+            "db_analysis_logs": analysis_logs,
+            "db_market_candles": market_candles
+        }
+        with open(filepath, "wb") as f:
+            pickle.dump(data, f)
+        logger.info(f"Модели и история для {pair} ({timeframe}) успешно сохранены на диск: {filepath}")
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка сохранения моделей на диск: {e}")
+        return False
+
+def load_models_from_disk(pair, timeframe):
+    """Загружает веса из pkl файла и импортирует упакованную историю обратно в SQLite базу данных."""
+    global dlinear_model, classifier_model, ai_trailing_model, current_model_pair, current_model_timeframe
+    try:
+        filepath = f"models/{pair.upper()}_{timeframe}.pkl"
+        if not os.path.exists(filepath):
+            return False
+        with open(filepath, "rb") as f:
+            data = pickle.load(f)
+        
+        # Обновляем глобальные инстанции моделей
+        dlinear_model = data["dlinear"]
+        classifier_model = data["classifier"]
+        ai_trailing_model = data["trailing"]
+        
+        current_model_pair = pair.upper()
+        current_model_timeframe = timeframe
+        
+        # Импортируем историю в базу данных SQLite
+        try:
+            import sqlite3
+            db_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading_bot.db")
+            conn = sqlite3.connect(db_file)
+            
+            # Импортируем ордера
+            if "db_orders" in data and data["db_orders"]:
+                for o in data["db_orders"]:
+                    columns = ", ".join(o.keys())
+                    placeholders = ", ".join("?" for _ in o)
+                    conn.execute(
+                        f"INSERT OR IGNORE INTO orders ({columns}) VALUES ({placeholders})", 
+                        tuple(o.values())
+                    )
+            
+            # Импортируем логи анализа ИИ
+            if "db_analysis_logs" in data and data["db_analysis_logs"]:
+                for l in data["db_analysis_logs"]:
+                    columns = ", ".join(l.keys())
+                    placeholders = ", ".join("?" for _ in l)
+                    conn.execute(
+                        f"INSERT OR IGNORE INTO analysis_logs ({columns}) VALUES ({placeholders})", 
+                        tuple(l.values())
+                    )
+            
+            # Импортируем свечи
+            if "db_market_candles" in data and data["db_market_candles"]:
+                for c in data["db_market_candles"]:
+                    columns = ", ".join(c.keys())
+                    placeholders = ", ".join("?" for _ in c)
+                    conn.execute(
+                        f"INSERT OR IGNORE INTO market_candles ({columns}) VALUES ({placeholders})", 
+                        tuple(c.values())
+                    )
+            
+            conn.commit()
+            conn.close()
+            
+            # Синхронизация облачного хранилища HuggingFace
+            try:
+                import db
+                db.upload_db_to_hf_async()
+            except:
+                pass
+                
+            logger.info(f"Исторические сделки, логи ИИ и свечи успешно импортированы в базу данных.")
+        except Exception as db_ex:
+            logger.warning(f"Ошибка импорта сопутствующей истории из pkl в БД: {db_ex}")
+            
+        logger.info(f"Модели для {pair} ({timeframe}) успешно загружены с диска!")
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка загрузки моделей с диска: {e}")
+        return False
 
 
 # =====================================================================
@@ -349,6 +483,27 @@ def calculate_indicators(df, rsi_period=14, atr_period=14):
             df['hour_feature'] = 0.5
     else:
         df['hour_feature'] = 0.5
+        
+    # 1. Расчет VWAP и нормализованного отклонения цены от него (vwap_dist)
+    try:
+        typical_price = (df['high'] + df['low'] + df['close']) / 3.0
+        cum_vol_price = (typical_price * df['volume']).cumsum()
+        cum_vol = df['volume'].cumsum()
+        vwap = cum_vol_price / (cum_vol + 1e-10)
+        df['vwap_dist'] = (df['close'] - vwap) / (vwap + 1e-10)
+    except Exception:
+        df['vwap_dist'] = 0.0
+
+    # 2. Расчет MACD Histogram и нормализация по цене (macd_hist_norm)
+    try:
+        ema12 = df['close'].ewm(span=12, adjust=False).mean()
+        ema26 = df['close'].ewm(span=26, adjust=False).mean()
+        macd_line = ema12 - ema26
+        signal_line = macd_line.ewm(span=9, adjust=False).mean()
+        macd_hist = macd_line - signal_line
+        df['macd_hist_norm'] = macd_hist / (df['close'] + 1e-10)
+    except Exception:
+        df['macd_hist_norm'] = 0.0
         
     return df
 
@@ -498,6 +653,15 @@ def train_models(df):
     """
     Обучает обе модели (DLinear и LightGBM/NumPy-классификатор) на исторических свечах на старте.
     """
+    # 0. Попытка загрузить веса с диска перед обучением
+    settings = db.get_settings()
+    pair = (dict(settings).get("trading_pair", "BTCUSDT") if settings else "BTCUSDT").upper()
+    tf = (dict(settings).get("timeframe", "3m") if settings else "3m")
+    
+    if load_models_from_disk(pair, tf):
+        logger.info(f"Модели для {pair} ({tf}) найдены на диске. Пропускаем этап первичного обучения.")
+        return
+        
     logger.info("Начало подготовки обучающих выборок...")
     df = calculate_indicators(df)
     
@@ -567,7 +731,7 @@ def train_models(df):
     df['dlinear_pred_2m'] = dlinear_pred_2m
     
     # Расчет таргетов классификатора с учетом настроек пользователя
-    settings = db.get_user_settings(1)
+    settings = db.get_settings()
     use_ai_limit_price = bool(dict(settings).get("use_ai_limit_price", 0)) if settings else False
     df = calculate_targets(df, use_ai_limit_price=use_ai_limit_price)
     
@@ -582,7 +746,10 @@ def train_models(df):
     df['volatility_target'] = volatility_targets
     
     # Список колонок-фичей для классификатора и трейлинга
-    feature_cols = ['rsi_norm', 'atr_pct', 'obi', 'cvd', 'dlinear_pred_1m', 'dlinear_pred_2m', 'hour_feature']
+    feature_cols = [
+        'rsi_norm', 'atr_pct', 'obi', 'cvd', 'dlinear_pred_1m', 'dlinear_pred_2m', 'hour_feature',
+        'vwap_dist', 'macd_hist_norm'
+    ]
     
     # Убираем пропуски перед обучением
     valid_df = df[feature_cols + ['target', 'volatility_target']].dropna()
@@ -620,35 +787,191 @@ def train_models(df):
     logger.info("Обучение ИИ-модели трейлинг-стопа...")
     ai_trailing_model.fit(X_lgb.values, y_vol.values, epochs=150, lr=0.01)
     logger.info("Все модели успешно обучены!")
+    # Сохраняем веса на диск
+    save_models_to_disk(pair, tf)
+    
+    global current_model_pair, current_model_timeframe
+    current_model_pair = pair.upper()
+    current_model_timeframe = tf
+
+def fetch_binance_klines_with_start(symbol, timeframe, start_time, limit=100, market_type="SPOT"):
+    import requests
+    import os
+    import trading_engine
+    symbol = symbol.upper()
+    market_type = market_type.upper()
+    use_us = os.environ.get("USE_BINANCE_US", "False").lower() == "true"
+    url = "https://fapi.binance.com/fapi/v1/klines" if market_type == "FUTURES" else (
+        "https://api.binance.us/api/v3/klines" if use_us else "https://api.binance.com/api/v3/klines"
+    )
+    params = {
+        "symbol": symbol,
+        "interval": timeframe,
+        "startTime": start_time,
+        "limit": limit
+    }
+    try:
+        res = requests.get(url, params=params, timeout=10, proxies=trading_engine.get_binance_proxies())
+        res.raise_for_status()
+        return res.json()
+    except Exception as e:
+        logger.warning(f"Error fetching klines with start_time={start_time}: {e}")
+        return []
 
 def retrain_on_market_history(pair, timeframe):
     """
     Дообучает DLinear и Классификатор на реальных накопленных свечах из SQLite.
     Позволяет нейросети учиться прямо в процессе торговли на рынке.
     """
+    global training_status
+    training_status = {
+        "active": True,
+        "pair": pair.upper(),
+        "timeframe": timeframe,
+        "started_at": time.time()
+    }
+    try:
+        return _retrain_on_market_history_inner(pair, timeframe)
+    finally:
+        training_status["active"] = False
+
+def _retrain_on_market_history_inner(pair, timeframe):
     import db
+    import trading_engine
     logger.info(f"Запуск самообучения нейросети на истории рынка для {pair} ({timeframe})...")
     
-    # 1. Извлекаем свечи из SQLite
-    rows = db.get_market_history(pair, timeframe, limit=3000)
-    if len(rows) < 150:
-        logger.info(f"Недостаточно сохраненных свечей для самообучения ({len(rows)}/150). Пропускаем.")
+    # Расчет длительности таймфрейма в миллисекундах для точной синхронизации свечей, ордеров и логов
+    timeframe_minutes = 15
+    if timeframe.endswith('m'):
+        timeframe_minutes = int(timeframe[:-1])
+    elif timeframe.endswith('h'):
+        timeframe_minutes = int(timeframe[:-1]) * 60
+    elif timeframe.endswith('d'):
+        timeframe_minutes = int(timeframe[:-1]) * 1440
+    timeframe_ms = timeframe_minutes * 60 * 1000
+    
+    # 1. Извлекаем свечи с Binance
+    try:
+        raw_klines = trading_engine.fetch_binance_klines(pair, timeframe, limit=1000)
+    except Exception as e:
+        logger.error(f"Ошибка получения истории рынка для дообучения: {e}")
         return False
         
-    # Преобразуем в DataFrame
-    df = pd.DataFrame([{
-        "open": r["open"],
-        "high": r["high"],
-        "low": r["low"],
-        "close": r["close"],
-        "volume": r["volume"],
-        "obi": np.clip(np.random.normal(0, 0.1), -1.0, 1.0),
-        "cvd": np.random.normal(0, 50.0)
-    } for r in rows])
+    if not raw_klines:
+        logger.info("Не удалось получить свечи с Binance. Пропускаем.")
+        return False
+
+    # Преобразуем в словарь для дедупликации
+    candles_dict = {
+        int(k[0]): {
+            "open_time": int(k[0]),
+            "open": float(k[1]),
+            "high": float(k[2]),
+            "low": float(k[3]),
+            "close": float(k[4]),
+            "volume": float(k[5]),
+            "obi": np.clip(np.random.normal(0, 0.1), -1.0, 1.0),
+            "cvd": np.random.normal(0, 50.0)
+        } for k in raw_klines
+    }
+
+    # Подгружаем исторические свечи из локальной БД для расширения периода
+    try:
+        conn = db.get_db_connection()
+        db_candles = conn.execute(
+            "SELECT open_time, open, high, low, close, volume FROM market_candles WHERE pair = ? AND timeframe = ? GROUP BY open_time ORDER BY open_time DESC LIMIT 10000",
+            (pair.upper(), timeframe)
+        ).fetchall()
+        conn.close()
+        for c in db_candles:
+            ot = int(c["open_time"])
+            if ot not in candles_dict:
+                candles_dict[ot] = {
+                    "open_time": ot,
+                    "open": float(c["open"]),
+                    "high": float(c["high"]),
+                    "low": float(c["low"]),
+                    "close": float(c["close"]),
+                    "volume": float(c["volume"]),
+                    "obi": np.clip(np.random.normal(0, 0.1), -1.0, 1.0),
+                    "cvd": np.random.normal(0, 50.0)
+                }
+    except Exception as db_ex:
+        logger.warning(f"Не удалось прочитать исторические свечи из БД: {db_ex}")
+
+    if len(candles_dict) < 150:
+        logger.info(f"Недостаточно свечей для самообучения ({len(candles_dict)}/150). Пропускаем.")
+        return False
+
+    # 2. Скачиваем недостающие свечи с Binance для исторических ордеров, если они выходят за пределы загруженного периода
+    try:
+        conn = db.get_db_connection()
+        orders_rows = conn.execute(
+            "SELECT * FROM orders WHERE pair = ? AND (timeframe = ? OR timeframe IS NULL) AND status IN ('CLOSED_TP', 'CLOSED_SL', 'CLOSED_MANUAL')",
+            (pair.upper(), timeframe)
+        ).fetchall()
+        conn.close()
+        
+        if orders_rows:
+            missing_starts = []
+            for order in orders_rows:
+                try:
+                    from datetime import datetime, timezone
+                    created_dt = datetime.strptime(order["created_at"], "%Y-%m-%d %H:%M:%S")
+                    order_ms = int(created_dt.replace(tzinfo=timezone.utc).timestamp() * 1000)
+                    
+                    has_candle = False
+                    for ot in list(candles_dict.keys()):
+                        if ot <= order_ms < ot + timeframe_ms:
+                            has_candle = True
+                            break
+                    if not has_candle:
+                        # Нам нужны свечи начиная с order_ms - 20 * timeframe_ms
+                        missing_starts.append(order_ms - 20 * timeframe_ms)
+                except:
+                    pass
+            
+            if missing_starts:
+                logger.info(f"Найдено {len(missing_starts)} ордеров вне загруженного диапазона свечей. Догружаем историю с Binance...")
+                settings_data = db.get_settings()
+                market_type = dict(settings_data).get("market_type", "SPOT") if settings_data else "SPOT"
+                for start_t in missing_starts[:15]: # Лимитируем до 15 запросов
+                    extra_klines = fetch_binance_klines_with_start(pair, timeframe, start_t, limit=100, market_type=market_type)
+                    if extra_klines:
+                        for k in extra_klines:
+                            ot = int(k[0])
+                            if ot not in candles_dict:
+                                candles_dict[ot] = {
+                                    "open_time": ot,
+                                    "open": float(k[1]),
+                                    "high": float(k[2]),
+                                    "low": float(k[3]),
+                                    "close": float(k[4]),
+                                    "volume": float(k[5]),
+                                    "obi": np.clip(np.random.normal(0, 0.1), -1.0, 1.0),
+                                    "cvd": np.random.normal(0, 50.0)
+                                }
+                        try:
+                            c_conn = db.get_db_connection()
+                            for k in extra_klines:
+                                c_conn.execute(
+                                    "INSERT OR IGNORE INTO market_candles (pair, timeframe, open_time, open, high, low, close, volume) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                                    (pair.upper(), timeframe, int(k[0]), float(k[1]), float(k[2]), float(k[3]), float(k[4]), float(k[5]))
+                                )
+                            c_conn.commit()
+                            c_conn.close()
+                        except Exception as db_wr_ex:
+                            logger.warning(f"Не удалось записать догруженные свечи в БД: {db_wr_ex}")
+    except Exception as db_ex:
+        logger.warning(f"Не удалось проверить недостающие свечи для ордеров: {db_ex}")
+
+    # Сортируем хронологически и создаем DataFrame
+    sorted_times = sorted(candles_dict.keys())
+    df = pd.DataFrame([candles_dict[t] for t in sorted_times])
+    df['time'] = df['open_time']
     
-    # 2. Вычисляем индикаторы и таргеты
     df = calculate_indicators(df)
-    settings = db.get_user_settings(1)
+    settings = db.get_settings()
     use_ai_limit_price = bool(dict(settings).get("use_ai_limit_price", 0)) if settings else False
     df = calculate_targets(df, use_ai_limit_price=use_ai_limit_price)
     
@@ -656,25 +979,12 @@ def retrain_on_market_history(pair, timeframe):
     try:
         conn = db.get_db_connection()
         orders_rows = conn.execute(
-            "SELECT * FROM orders WHERE pair = ? AND status IN ('CLOSED_TP', 'CLOSED_SL', 'CLOSED_MANUAL')",
-            (pair.upper(),)
+            "SELECT * FROM orders WHERE pair = ? AND (timeframe = ? OR timeframe IS NULL) AND status IN ('CLOSED_TP', 'CLOSED_SL', 'CLOSED_MANUAL')",
+            (pair.upper(), timeframe)
         ).fetchall()
         conn.close()
         
         if orders_rows:
-            # Превращаем в массив open_time
-            df["open_time"] = [r["open_time"] for r in rows]
-            
-            # Определяем размер таймфрейма в мс
-            timeframe_minutes = 15
-            if timeframe.endswith('m'):
-                timeframe_minutes = int(timeframe[:-1])
-            elif timeframe.endswith('h'):
-                timeframe_minutes = int(timeframe[:-1]) * 60
-            elif timeframe.endswith('d'):
-                timeframe_minutes = int(timeframe[:-1]) * 1440
-            timeframe_ms = timeframe_minutes * 60 * 1000
-            
             for order in orders_rows:
                 try:
                     from datetime import datetime, timezone
@@ -752,7 +1062,10 @@ def retrain_on_market_history(pair, timeframe):
     df['dlinear_pred_2m'] = dlinear_pred_2m
     
     # 5. Переобучаем/дообучаем классификатор и ИИ-трейлинг
-    feature_cols = ['rsi_norm', 'atr_pct', 'obi', 'cvd', 'dlinear_pred_1m', 'dlinear_pred_2m', 'hour_feature']
+    feature_cols = [
+        'rsi_norm', 'atr_pct', 'obi', 'cvd', 'dlinear_pred_1m', 'dlinear_pred_2m', 'hour_feature',
+        'vwap_dist', 'macd_hist_norm'
+    ]
     
     # Расчет таргета для ИИ-трейлинга
     volatility_targets = np.zeros(n)
@@ -768,6 +1081,137 @@ def retrain_on_market_history(pair, timeframe):
     X_lgb = valid_df[feature_cols]
     y_lgb = valid_df['target']
     y_vol = valid_df['volatility_target']
+
+    # --- REINFORCEMENT LEARNING FEEDBACK LOOP ---
+    # Обучаем классификатор на собственных логах и сделках
+    try:
+        import sqlite3
+        db_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading_bot.db")
+        if os.path.exists(db_file):
+            conn = sqlite3.connect(db_file)
+            conn.row_factory = sqlite3.Row
+            
+            # 1. Загружаем историю закрытых сделок (ордеров)
+            db_orders = conn.execute(
+                "SELECT * FROM orders WHERE status LIKE 'CLOSED_%' AND pair = ? AND (timeframe = ? OR timeframe IS NULL) ORDER BY created_at DESC LIMIT 1000", 
+                (pair.upper(), timeframe)
+            ).fetchall()
+            
+            # 2. Загружаем историю логируемых HOLD-сигналов
+            db_logs = conn.execute(
+                "SELECT * FROM analysis_logs WHERE pair = ? AND stage3_output LIKE '%\"action\": \"HOLD\"%' ORDER BY created_at DESC LIMIT 5000", 
+                (pair.upper(),)
+            ).fetchall()
+            conn.close()
+            
+            extra_X = []
+            extra_y = []
+            
+            # Обработка сделок: учимся на ошибках (убытках) и закрепляем прибыльные паттерны
+            for order in db_orders:
+                order_time = order["created_at"]
+                pnl = float(order["pnl"] or 0.0)
+                
+                try:
+                    o_dt = pd.to_datetime(order_time)
+                    o_ts_ms = int(o_dt.timestamp() * 1000)
+                    
+                    # Находим ближайшую свечу в нашем df
+                    idx = (df['time'] - o_ts_ms).abs().idxmin()
+                    if idx < len(df) and abs(df.loc[idx, 'time'] - o_ts_ms) <= timeframe_ms:
+                        feat = df.iloc[idx][feature_cols].values
+                        if not np.isnan(feat).any():
+                            close_reason = order.get("status", "CLOSED_MANUAL")
+                            if pnl < 0:
+                                # Ошибка: сделка закрылась в минус. Учим модель выставлять target = 0 (не торговать здесь)
+                                target_val = 0.0
+                                # Если выбило по обычному стоп-лоссу (CLOSED_SL), штрафуем паттерн входа сильнее (вес 6), чем при ручном закрытии (вес 4)
+                                weight = 6 if close_reason == "CLOSED_SL" else 4
+                            else:
+                                # Успех: сделка в плюс. Закрепляем паттерн (target = 1)
+                                target_val = 1.0
+                                # Если закрылось по CLOSED_SL, но PnL > 0 — это сработка трейлинга в плюс! Закрепляем сильнее (вес 5)
+                                if close_reason == "CLOSED_SL":
+                                    weight = 5
+                                elif close_reason == "CLOSED_TP":
+                                    weight = 4
+                                else:
+                                    weight = 2
+                                
+                            for _ in range(weight):
+                                extra_X.append(feat)
+                                extra_y.append(target_val)
+                except:
+                    pass
+            
+            # Обработка HOLD-логов: выявляем упущенные возможности входа
+            for log in db_logs:
+                log_time = log["created_at"]
+                try:
+                    l_dt = pd.to_datetime(log_time)
+                    l_ts_ms = int(l_dt.timestamp() * 1000)
+                    
+                    # Синхронизированный поиск: находим точную свечу, во время которой был сделан этот лог
+                    match_mask = (df['time'] <= l_ts_ms) & (l_ts_ms < df['time'] + timeframe_ms)
+                    if match_mask.any():
+                        idx = df[match_mask].index[-1]
+                    else:
+                        continue
+                    
+                    # Проверяем последующие 10 свечей для оценки упущенной сделки
+                    if idx < len(df) - 10:
+                        entry_price = df.iloc[idx]["close"]
+                        future_highs = df['high'].iloc[idx+1 : idx+11].values
+                        future_lows = df['low'].iloc[idx+1 : idx+11].values
+                        
+                        # ATR-пороги для расчета TP/SL
+                        atr_val = df.iloc[idx]["atr"]
+                        if atr_val and atr_val > 0:
+                            offset_tp = 4.0 * atr_val
+                            offset_sl = 2.0 * atr_val
+                        else:
+                            offset_tp = entry_price * 0.006
+                            offset_sl = entry_price * 0.003
+                            
+                        # Проверяем упущенную LONG (BUY) сделку
+                        tp_price_buy = entry_price + offset_tp
+                        sl_price_buy = entry_price - offset_sl
+                        hit_buy = False
+                        for j in range(10):
+                            if future_lows[j] <= sl_price_buy:
+                                break
+                            if future_highs[j] >= tp_price_buy:
+                                hit_buy = True
+                                break
+                                
+                        # Проверяем упущенную SHORT (SELL) сделку
+                        tp_price_sell = entry_price - offset_tp
+                        sl_price_sell = entry_price + offset_sl
+                        hit_sell = False
+                        for j in range(10):
+                            if future_highs[j] >= sl_price_sell:
+                                break
+                            if future_lows[j] <= tp_price_sell:
+                                hit_sell = True
+                                break
+                                
+                        if hit_buy or hit_sell:
+                            feat = df.iloc[idx][feature_cols].values
+                            if not np.isnan(feat).any():
+                                for _ in range(3):  # Дублируем сэмпл для закрепления
+                                    extra_X.append(feat)
+                                    extra_y.append(1.0)
+                except:
+                    pass
+            
+            if len(extra_X) > 0:
+                extra_X_df = pd.DataFrame(extra_X, columns=feature_cols)
+                extra_y_series = pd.Series(extra_y)
+                X_lgb = pd.concat([X_lgb, extra_X_df], ignore_index=True)
+                y_lgb = pd.concat([y_lgb, extra_y_series], ignore_index=True)
+                logger.info(f"[RL FEEDBACK] Добавлено {len(extra_X)} адаптивных сэмплов из закрытых ордеров и HOLD-логов для автокоррекции бота.")
+    except Exception as db_ex:
+        logger.warning(f"[RL FEEDBACK] Не удалось загрузить обратную связь из БД (некритично): {db_ex}")
     
     global classifier_model, ai_trailing_model
     if HAS_LIGHTGBM:
@@ -789,10 +1233,248 @@ def retrain_on_market_history(pair, timeframe):
         # NumPyClassifier просто делает еще 50 шагов градиентного спуска по новым данным
         classifier_model.fit(X_lgb.values, y_lgb.values, epochs=50, lr=0.05)
         
-    # Дообучаем модель трейлинг-стопа на новых данных
-    ai_trailing_model.fit(X_lgb.values, y_vol.values, epochs=50, lr=0.01)
+    # Дообучаем модель трейлинг-стопа на новых данных (используем исходный valid_df)
+    ai_trailing_model.fit(valid_df[feature_cols].values, valid_df['volatility_target'].values, epochs=50, lr=0.01)
         
     logger.info(f"Самообучение завершено! Модели успешно адаптированы под новые рыночные данные ({len(valid_df)} строк).")
+    # Сохраняем адаптированные веса на диск
+    save_models_to_disk(pair, timeframe)
+    global current_model_pair, current_model_timeframe
+    current_model_pair = pair.upper()
+    current_model_timeframe = timeframe
+    return True
+
+def bootstrap_virtual_training(pair, timeframe):
+    """
+    Выполняет виртуальное ускоренное обучение (бэктест-симуляцию) на реальных свечах с Binance,
+    если у нас нет сохраненной нейросети. Симулирует ордера, стопы и тейки,
+    и использует результаты для RL-дообучения.
+    """
+    global training_status
+    training_status = {
+        "active": True,
+        "pair": pair.upper(),
+        "timeframe": timeframe,
+        "started_at": time.time()
+    }
+    try:
+        return _bootstrap_virtual_training_inner(pair, timeframe)
+    finally:
+        training_status["active"] = False
+
+def _bootstrap_virtual_training_inner(pair, timeframe):
+    logger.info(f"🚀 Запуск виртуального обучения (бутстрап) для {pair} ({timeframe})...")
+    
+    import trading_engine
+    try:
+        raw_klines = trading_engine.fetch_binance_klines(pair, timeframe, limit=1500)
+    except Exception as e:
+        logger.error(f"Ошибка получения свечей для виртуального обучения: {e}")
+        return False
+        
+    if not raw_klines or len(raw_klines) < 150:
+        logger.warning("Недостаточно свечей с Binance для запуска симуляции.")
+        return False
+        
+    df_list = []
+    for k in raw_klines:
+        df_list.append({
+            "open_time": int(k[0]),
+            "open": float(k[1]),
+            "high": float(k[2]),
+            "low": float(k[3]),
+            "close": float(k[4]),
+            "volume": float(k[5]),
+            "obi": np.clip(np.random.normal(0, 0.1), -1.0, 1.0),
+            "cvd": np.random.normal(0, 50.0)
+        })
+    df = pd.DataFrame(df_list)
+    df['time'] = df['open_time']
+    
+    df = calculate_indicators(df)
+    n = len(df)
+    
+    closes = df['close'].values
+    X_dlinear = []
+    Y_dlinear = []
+    for i in range(59, n - 2):
+        window = closes[i-59 : i+1]
+        last_val = window[-1]
+        x_norm = window / last_val - 1.0
+        y_norm = np.array([closes[i+1] / last_val - 1.0, closes[i+2] / last_val - 1.0])
+        X_dlinear.append(x_norm)
+        Y_dlinear.append(y_norm)
+        
+    X_dlinear = np.array(X_dlinear)
+    Y_dlinear = np.array(Y_dlinear)
+    
+    global dlinear_model, classifier_model, ai_trailing_model
+    if HAS_TORCH:
+        logger.info("Бутстрап: Первичное обучение DLinear (PyTorch)...")
+        import torch.nn as nn
+        import torch.optim as optim
+        import torch
+        dlinear_model = PyTorchDLinear(seq_len=60, pred_len=2)
+        criterion = nn.MSELoss()
+        optimizer = optim.Adam(dlinear_model.parameters(), lr=0.005)
+        X_t = torch.tensor(X_dlinear, dtype=torch.float32).unsqueeze(-1)
+        Y_t = torch.tensor(Y_dlinear, dtype=torch.float32).unsqueeze(-1)
+        dlinear_model.train()
+        for epoch in range(15):
+            optimizer.zero_grad()
+            outputs = dlinear_model(X_t)
+            loss = criterion(outputs, Y_t)
+            loss.backward()
+            optimizer.step()
+        dlinear_model.eval()
+    else:
+        logger.info("Бутстрап: Первичное обучение DLinear (NumPy)...")
+        dlinear_model = NumPyDLinear(seq_len=60, pred_len=2)
+        dlinear_model.fit(X_dlinear, Y_dlinear, epochs=15, lr=0.005)
+        
+    dlinear_pred_1m = np.zeros(n)
+    dlinear_pred_2m = np.zeros(n)
+    if HAS_TORCH:
+        import torch
+        with torch.no_grad():
+            X_t = torch.tensor(X_dlinear, dtype=torch.float32).unsqueeze(-1)
+            preds = dlinear_model(X_t).squeeze(-1).numpy()
+    else:
+        preds = dlinear_model.forward(X_dlinear)
+    dlinear_pred_1m[59 : n - 2] = preds[:, 0]
+    dlinear_pred_2m[59 : n - 2] = preds[:, 1]
+    
+    df['dlinear_pred_1m'] = dlinear_pred_1m
+    df['dlinear_pred_2m'] = dlinear_pred_2m
+    
+    feature_cols = [
+        'rsi_norm', 'atr_pct', 'obi', 'cvd', 'dlinear_pred_1m', 'dlinear_pred_2m', 'hour_feature',
+        'vwap_dist', 'macd_hist_norm'
+    ]
+    
+    virtual_orders = []
+    for i in range(60, n - 20):
+        rsi_norm_val = df.iloc[i]['rsi_norm']
+        d_pred = df.iloc[i]['dlinear_pred_1m']
+        
+        signal = None
+        if rsi_norm_val < 0.32 or d_pred > 0.0015:
+            signal = "BUY"
+        elif rsi_norm_val > 0.68 or d_pred < -0.0015:
+            signal = "SELL"
+            
+        if signal:
+            entry_price = df.iloc[i]['close']
+            atr_val = df.iloc[i]['atr']
+            if atr_val and atr_val > 0:
+                offset_tp = 4.0 * atr_val
+                offset_sl = 2.0 * atr_val
+            else:
+                offset_tp = entry_price * 0.006
+                offset_sl = entry_price * 0.003
+                
+            tp_price = entry_price + offset_tp if signal == "BUY" else entry_price - offset_tp
+            sl_price = entry_price - offset_sl if signal == "BUY" else entry_price + offset_sl
+            
+            pnl = None
+            is_win = 0
+            for j in range(i + 1, min(i + 21, n)):
+                high_j = df.iloc[j]['high']
+                low_j = df.iloc[j]['low']
+                if signal == "BUY":
+                    if low_j <= sl_price:
+                        pnl = (sl_price - entry_price) / entry_price * 100
+                        break
+                    if high_j >= tp_price:
+                        pnl = (tp_price - entry_price) / entry_price * 100
+                        is_win = 1
+                        break
+                else:
+                    if high_j >= sl_price:
+                        pnl = (entry_price - sl_price) / entry_price * 100
+                        break
+                    if low_j <= tp_price:
+                        pnl = (entry_price - tp_price) / entry_price * 100
+                        is_win = 1
+                        break
+                        
+            if pnl is None:
+                exit_price = df.iloc[min(i + 20, n - 1)]['close']
+                pnl = (exit_price - entry_price) / entry_price * 100 if signal == "BUY" else (entry_price - exit_price) / entry_price * 100
+                is_win = 1 if pnl > 0 else 0
+                
+            virtual_orders.append({
+                "idx": i,
+                "pnl": pnl,
+                "is_win": is_win
+            })
+            
+    settings = db.get_settings()
+    use_ai_limit_price = bool(dict(settings).get("use_ai_limit_price", 0)) if settings else False
+    df = calculate_targets(df, use_ai_limit_price=use_ai_limit_price)
+    
+    for vo in virtual_orders:
+        df.loc[vo["idx"], 'target'] = vo["is_win"]
+        
+    volatility_targets = np.zeros(n)
+    for i in range(n):
+        if i + 10 < n:
+            volatility_targets[i] = np.std(closes[i+1 : i+11]) / closes[i]
+        else:
+            volatility_targets[i] = np.nan
+    df['volatility_target'] = volatility_targets
+    
+    valid_df = df[feature_cols + ['target', 'volatility_target']].dropna()
+    X_lgb = valid_df[feature_cols]
+    y_lgb = valid_df['target']
+    y_vol = valid_df['volatility_target']
+    
+    extra_X = []
+    extra_y = []
+    for vo in virtual_orders:
+        feat = df.iloc[vo["idx"]][feature_cols].values
+        if not np.isnan(feat).any():
+            target_val = 1.0 if vo["is_win"] == 1 else 0.0
+            weight = 5 if vo["is_win"] == 1 else 2
+            for _ in range(weight):
+                extra_X.append(feat)
+                extra_y.append(target_val)
+                
+    if len(extra_X) > 0:
+        extra_X_df = pd.DataFrame(extra_X, columns=feature_cols)
+        extra_y_series = pd.Series(extra_y)
+        X_lgb = pd.concat([X_lgb, extra_X_df], ignore_index=True)
+        y_lgb = pd.concat([y_lgb, extra_y_series], ignore_index=True)
+        
+    logger.info(f"Бутстрап: Найдено и симулировано {len(virtual_orders)} виртуальных сделок для обучения классификатора.")
+    
+    if HAS_LIGHTGBM:
+        import lightgbm as lgb
+        params = {
+            'objective': 'binary',
+            'metric': 'binary_logloss',
+            'boosting_type': 'gbdt',
+            'learning_rate': 0.05,
+            'num_leaves': 15,
+            'max_depth': 4,
+            'feature_fraction': 0.8,
+            'verbose': -1,
+            'seed': 42
+        }
+        train_data = lgb.Dataset(X_lgb, label=y_lgb)
+        classifier_model = lgb.train(params, train_data, num_boost_round=100)
+    else:
+        classifier_model = NumPyClassifier(num_features=len(feature_cols))
+        classifier_model.fit(X_lgb.values, y_lgb.values, epochs=200, lr=0.1)
+        
+    ai_trailing_model.fit(valid_df[feature_cols].values, valid_df['volatility_target'].values, epochs=150, lr=0.01)
+    
+    logger.info("✅ Виртуальное обучение успешно завершено! Сохраняем веса...")
+    save_models_to_disk(pair, timeframe)
+    
+    global current_model_pair, current_model_timeframe
+    current_model_pair = pair.upper()
+    current_model_timeframe = timeframe
     return True
 
 
@@ -866,6 +1548,11 @@ class ScalpingEngine:
         pred_change_1m = dlinear_pred[0]
         pred_change_2m = dlinear_pred[1]
         
+        # Вычисляем нормированный час суток для фичи времени
+        current_time_ms = float(current_row["time"]) if "time" in current_row else (float(current_row["open_time"]) if "open_time" in current_row else time.time() * 1000)
+        import pandas as pd
+        current_hour = pd.to_datetime(current_time_ms, unit='ms').hour / 24.0
+        
         # --- Шаг 2: Инференс Классификатора ---
         features = np.array([[
             current_rsi_norm,
@@ -873,7 +1560,10 @@ class ScalpingEngine:
             current_obi,
             current_cvd,
             pred_change_1m,
-            pred_change_2m
+            pred_change_2m,
+            current_hour,
+            current_row.get("vwap_dist", 0.0),
+            current_row.get("macd_hist_norm", 0.0)
         ]])
         
         # Различный синтаксис предсказания в зависимости от модели
@@ -986,7 +1676,7 @@ async def run_websocket_simulation(engine, tick_delay=0.1):
                     f"Прогноз DLinear 1m/2m: {res['dlinear_1m_pct']:.4f}% / {res['dlinear_2m_pct']:.4f}%\n"
                     f"Вероятность классификатора: <b>{res['prob']:.4f}</b>"
                 )
-                asyncio.create_task(send_telegram_notification_async(msg))
+                asyncio.create_task(send_notification_async(msg))
             elif res["action"] == "SKIP_VOLATILITY_BLOCKED":
                 action_str = f"\033[91m{res['action']}\033[0m"
             else:

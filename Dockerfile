@@ -16,7 +16,6 @@ WORKDIR /app
 # Copy requirements and install
 COPY --chown=user requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install --no-cache-dir pyTelegramBotAPI
 
 # Copy project files
 COPY --chown=user . .

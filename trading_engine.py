@@ -17,6 +17,7 @@ import scalping_ensemble
 _stop_event = threading.Event()
 _simulator_thread = None
 _bot_runner_thread = None
+LATEST_LIVE_SIGNAL = None
 
 # Хранилище буферов свечей для каждого пользователя: user_id -> deque(maxlen=100)
 _user_buffers = {}
@@ -25,6 +26,16 @@ _user_buffers = {}
 _symbol_filters = {}
 
 def get_binance_proxies():
+    try:
+        settings = db.get_settings()
+        if settings and settings.get("use_proxy") and settings.get("proxy_url"):
+            proxy = settings["proxy_url"].strip()
+            return {
+                "http": proxy,
+                "https": proxy
+            }
+    except Exception:
+        pass
     proxy = os.environ.get("BINANCE_PROXY")
     if proxy:
         return {
@@ -172,20 +183,20 @@ def set_futures_leverage(api_key, api_secret, symbol, leverage):
         print(f"[Leverage] Error setting leverage for {symbol}: {e}")
         return False
 
-def fetch_binance_balance(user_id, market_type="SPOT"):
+def fetch_binance_balance(market_type="SPOT"):
     """
     Получает реальный баланс пользователя на Binance (в соответствии с котируемым активом, например USDT или USDC).
     Кэширует баланс на 4 секунды для предотвращения банов по лимитам запросов.
     """
     market_type = market_type.upper()
-    cache_key = (user_id, market_type)
+    cache_key = (market_type)
     now = time.time()
     if cache_key in _balance_cache:
         cached_time, cached_bal = _balance_cache[cache_key]
         if now - cached_time < 4.0:
             return cached_bal
 
-    user = db.get_user_by_id(user_id)
+    user = db.get_settings()
     if not user:
         return None
         
@@ -196,7 +207,7 @@ def fetch_binance_balance(user_id, market_type="SPOT"):
         
     # Определяем котируемый актив (по умолчанию USDT, но если пара ETHUSDC - то USDC)
     quote_asset = "USDT"
-    settings = db.get_user_settings(user_id)
+    settings = db.get_settings()
     if settings:
         pair = settings["trading_pair"].upper()
         if pair.endswith("USDC"):
@@ -228,27 +239,27 @@ def fetch_binance_balance(user_id, market_type="SPOT"):
         _balance_cache[cache_key] = (now, balance_val)
         return balance_val
     except Exception as e:
-        print(f"Error fetching Binance balance for user {user_id} ({quote_asset}): {e}")
+        print(f"Error fetching Binance balance  ({quote_asset}): {e}")
         # Return last cached balance if available
         if cache_key in _balance_cache:
             return _balance_cache[cache_key][1]
         return None
 
-def fetch_live_positions(user_id, market_type="SPOT"):
+def fetch_live_positions(market_type="SPOT"):
     """
     Получает активные позиции пользователя напрямую с Binance.
     Для FUTURES возвращает список открытых позиций с реальным PnL и ценой входа.
     Кэширует позиции на 3 секунды.
     """
     market_type = market_type.upper()
-    cache_key = (user_id, market_type)
+    cache_key = (market_type)
     now = time.time()
     if cache_key in _positions_cache:
         cached_time, cached_pos = _positions_cache[cache_key]
         if now - cached_time < 3.0:
             return cached_pos
 
-    user = db.get_user_by_id(user_id)
+    user = db.get_settings()
     if not user:
         return []
         
@@ -287,20 +298,20 @@ def fetch_live_positions(user_id, market_type="SPOT"):
             return _positions_cache[cache_key][1]
         return []
 
-def fetch_live_open_orders(user_id, market_type="SPOT"):
+def fetch_live_open_orders(market_type="SPOT"):
     """
     Получает открытые лимитные ордера пользователя напрямую с Binance.
     Кэширует открытые ордера на 4 секунды.
     """
     market_type = market_type.upper()
-    cache_key = (user_id, market_type)
+    cache_key = (market_type)
     now = time.time()
     if cache_key in _open_orders_cache:
         cached_time, cached_ord = _open_orders_cache[cache_key]
         if now - cached_time < 4.0:
             return cached_ord
 
-    user = db.get_user_by_id(user_id)
+    user = db.get_settings()
     if not user:
         return []
         
@@ -337,12 +348,12 @@ def fetch_live_open_orders(user_id, market_type="SPOT"):
 # =====================================================================
 # 2. РАБОТА С СИГНАЛАМИ И ОРДЕРАМИ (ДЕМО + РЕАЛ)
 # =====================================================================
-def resolve_order_size(user_id, order_size_setting, trading_mode, market_type="SPOT"):
+def resolve_order_size(order_size_setting, trading_mode, market_type="SPOT"):
     """
     Разрешает настройку размера ордера (которая может быть числом или строкой вроде '50%')
     в абсолютное значение USDT.
     """
-    user = db.get_user_by_id(user_id)
+    user = db.get_settings()
     if not user:
         return 100.0
         
@@ -350,7 +361,7 @@ def resolve_order_size(user_id, order_size_setting, trading_mode, market_type="S
         if isinstance(order_size_setting, str) and "%" in order_size_setting:
             pct = float(order_size_setting.replace("%", "").strip()) / 100.0
             if trading_mode == "LIVE":
-                balance = fetch_binance_balance(user_id, market_type)
+                balance = fetch_binance_balance(market_type)
                 if balance is None or balance <= 0:
                     print(f"LIVE balance is zero or none, falling back to $100.")
                     return 100.0
@@ -363,12 +374,12 @@ def resolve_order_size(user_id, order_size_setting, trading_mode, market_type="S
         print(f"Error resolving order size '{order_size_setting}': {e}. Falling back to $100.")
         return 100.0
 
-def place_scalping_order(user_id, pair, entry_price, trading_mode, size_usdt, market_type="SPOT", leverage=1, atr=None, side="BUY", prob=None, pred_change_1m=None):
+def place_scalping_order(pair, entry_price, trading_mode, size_usdt, market_type="SPOT", leverage=1, atr=None, side="BUY", prob=None, pred_change_1m=None):
     """
     Размещает лимитный или рыночный ордер в Демо-режиме или в реальном режиме на Binance.
     leverage применяется только для FUTURES (1-125x).
     """
-    user = db.get_user_by_id(user_id)
+    user = db.get_settings()
     if not user:
         return
 
@@ -377,7 +388,7 @@ def place_scalping_order(user_id, pair, entry_price, trading_mode, size_usdt, ma
     leverage = max(1, min(125, int(leverage)))
 
     side = side.upper()
-    settings_dict = dict(db.get_user_settings(user_id))
+    settings_dict = dict(db.get_settings())
     use_limit_orders = settings_dict.get("use_limit_orders", 1)
     use_ai_limit_price = settings_dict.get("use_ai_limit_price", 0)
 
@@ -416,6 +427,7 @@ def place_scalping_order(user_id, pair, entry_price, trading_mode, size_usdt, ma
         sl = entry_price + offset_sl
 
     use_trailing_stop = settings_dict.get("use_trailing_stop", 1)
+    timeframe = settings_dict.get("timeframe", "1m")
     if use_trailing_stop:
         tp = None  # Remove take profit if trailing is active
 
@@ -426,9 +438,8 @@ def place_scalping_order(user_id, pair, entry_price, trading_mode, size_usdt, ma
         api_key = user["binance_api_key"]
         api_secret = user["binance_api_secret"]
         if not api_key or not api_secret:
-            print(f"User {user_id} - LIVE mode enabled but API keys are missing!")
-            send_telegram_notification(
-                user_id,
+            print(f"LIVE mode enabled but API keys are missing!")
+            send_notification(
                 "⚠️ <b>[LIVE Mode]</b> Торговля заблокирована: укажите API Key и Secret в настройках!"
             )
             return
@@ -440,7 +451,7 @@ def place_scalping_order(user_id, pair, entry_price, trading_mode, size_usdt, ma
         endpoint = "/fapi/v1/order" if market_type.upper() == "FUTURES" else "/api/v3/order"
 
         if use_market:
-            print(f"Placing LIVE Binance MARKET {side} order for user {user_id} - {pair} (Qty: {qty}, Market: {market_type}, Leverage: {leverage}x)")
+            print(f"Placing LIVE Binance MARKET {side} order  - {pair} (Qty: {qty}, Market: {market_type}, Leverage: {leverage}x)")
             params = {
                 "symbol": pair.upper(),
                 "side": side,
@@ -472,7 +483,6 @@ def place_scalping_order(user_id, pair, entry_price, trading_mode, size_usdt, ma
                         tp = None
 
                     db.create_order(
-                        user_id=user_id,
                         pair=pair,
                         side=side,
                         entry_price=execution_price,
@@ -484,13 +494,13 @@ def place_scalping_order(user_id, pair, entry_price, trading_mode, size_usdt, ma
                         market_type=market_type,
                         leverage=leverage,
                         status="ACTIVE",
-                        trailing_distance=offset_sl
+                        trailing_distance=offset_sl,
+                        timeframe=timeframe
                     )
                     lev_str = f" | Плечо: {leverage}x" if market_type.upper() == "FUTURES" else ""
                     tp_str = f"${tp:,.4f}" if tp is not None else "Не задан (Трейлинг-стоп)"
                     sl_str = f"${sl:,.4f}" if sl is not None else "Не задан"
-                    send_telegram_notification(
-                        user_id,
+                    send_notification(
                         f"🟢 <b>[LIVE Mode] Рыночный ордер исполнен на Binance ({market_type})</b>\n\n"
                         f"🚀 Сделка: <b>{side}</b> на <b>{pair}</b>{lev_str}\n"
                         f"• Кол-во: {qty}\n"
@@ -502,14 +512,12 @@ def place_scalping_order(user_id, pair, entry_price, trading_mode, size_usdt, ma
                 else:
                     err_msg = res_data.get("msg", "Unknown error")
                     print(f"Binance LIVE Order Error: {res_data}")
-                    send_telegram_notification(
-                        user_id,
+                    send_notification(
                         f"⚠️ <b>[LIVE Mode] Ошибка создания рыночного ордера на Binance ({market_type})</b>\n\nКод: {err_msg}"
                     )
             except Exception as e:
                 print(f"Error placing LIVE Binance market order: {e}")
-                send_telegram_notification(
-                    user_id,
+                send_notification(
                     f"⚠️ <b>[LIVE Mode] Ошибка сети при создании рыночного ордера на Binance ({market_type})</b>\n\nДетали: {str(e)}"
                 )
         else:
@@ -519,7 +527,6 @@ def place_scalping_order(user_id, pair, entry_price, trading_mode, size_usdt, ma
                     tp = None
 
                 db.create_order(
-                    user_id=user_id,
                     pair=pair,
                     side=side,
                     entry_price=limit_price,
@@ -531,13 +538,13 @@ def place_scalping_order(user_id, pair, entry_price, trading_mode, size_usdt, ma
                     market_type=market_type,
                     leverage=leverage,
                     status="PENDING",
-                    trailing_distance=offset_sl
+                    trailing_distance=offset_sl,
+                    timeframe=timeframe
                 )
                 lev_str = f" | Плечо: {leverage}x" if market_type.upper() == "FUTURES" else ""
                 tp_str = f"${tp:,.4f}" if tp is not None else "Не задан (Трейлинг-стоп)"
                 sl_str = f"${sl:,.4f}" if sl is not None else "Не задан"
-                send_telegram_notification(
-                    user_id,
+                send_notification(
                     f"🟢 <b>[LIVE Mode] Локальный лимитный ордер выставлен в боте ({market_type})</b>\n\n"
                     f"🚀 Сделка: <b>{side}</b> на <b>{pair}</b>{lev_str}\n"
                     f"• Кол-во: {qty}\n"
@@ -548,27 +555,23 @@ def place_scalping_order(user_id, pair, entry_price, trading_mode, size_usdt, ma
                 )
             except Exception as e:
                 print(f"Error creating local LIVE limit order: {e}")
-                send_telegram_notification(
-                    user_id,
+                send_notification(
                     f"⚠️ <b>[LIVE Mode] Ошибка создания локального лимитного ордера</b>\n\nДетали: {str(e)}"
                 )
 
     else:  # DEMO mode
         if use_market:
-            # For MARKET orders, deduct balance immediately (if sufficient)
-            if user["demo_balance"] < size_usdt:
-                send_telegram_notification(
-                    user_id,
-                    f"⚠️ <b>[DEMO Mode] Недостаточно средств для открытия позиции!</b>\n\n"
-                    f"Баланс: ${user['demo_balance']:,.2f} | Требуется: ${size_usdt:,.2f}"
+            active_orders = db.get_active_orders()
+            locked_collateral = sum(float(o["size_usdt"]) for o in active_orders)
+            free_margin = user["demo_balance"] - locked_collateral
+            if free_margin < size_usdt:
+                send_notification(
+                    f"⚠️ <b>[DEMO Mode] Недостаточно свободных средств!</b>\n\n"
+                    f"Свободно: ${free_margin:,.2f} | Требуется: ${size_usdt:,.2f}"
                 )
                 return
-            
-            db.update_user_demo_balance(user_id, user["demo_balance"] - size_usdt)
-            
             # TP/SL is already calculated relative to entry_price (market price)
             db.create_order(
-                user_id=user_id,
                 pair=pair,
                 side=side,
                 entry_price=entry_price,
@@ -580,13 +583,13 @@ def place_scalping_order(user_id, pair, entry_price, trading_mode, size_usdt, ma
                 market_type=market_type,
                 leverage=leverage,
                 status="ACTIVE",
-                trailing_distance=offset_sl
+                trailing_distance=offset_sl,
+                timeframe=timeframe
             )
             lev_str = f" | Плечо: {leverage}x" if market_type.upper() == "FUTURES" else ""
             tp_str = f"${tp:,.4f}" if tp is not None else "Не задан (Трейлинг-стоп)"
             sl_str = f"${sl:,.4f}" if sl is not None else "Не задан"
-            send_telegram_notification(
-                user_id,
+            send_notification(
                 f"🟢 <b>[DEMO Mode] Рыночный ордер исполнен ({market_type})</b>\n\n"
                 f"🚀 Имитация {side} на <b>{pair}</b>!{lev_str}\n"
                 f"• Цена входа: ${entry_price:,.4f}\n"
@@ -598,7 +601,6 @@ def place_scalping_order(user_id, pair, entry_price, trading_mode, size_usdt, ma
             # Коллатерал (size_usdt) будет вычитаться только при срабатывании (активации) ордера
             # в функции db.activate_pending_order(), чтобы избежать двойного списания.
             db.create_order(
-                user_id=user_id,
                 pair=pair,
                 side=side,
                 entry_price=limit_price,
@@ -610,13 +612,13 @@ def place_scalping_order(user_id, pair, entry_price, trading_mode, size_usdt, ma
                 market_type=market_type,
                 leverage=leverage,
                 status="PENDING",
-                trailing_distance=offset_sl
+                trailing_distance=offset_sl,
+                timeframe=timeframe
             )
             lev_str = f" | Плечо: {leverage}x" if market_type.upper() == "FUTURES" else ""
             tp_str = f"${tp:,.4f}" if tp is not None else "Не задан (Трейлинг-стоп)"
             sl_str = f"${sl:,.4f}" if sl is not None else "Не задан"
-            send_telegram_notification(
-                user_id,
+            send_notification(
                 f"🟢 <b>[DEMO Mode] Лимитный ордер выставлен ({market_type})</b>\n\n"
                 f"🚀 Имитация {side} на <b>{pair}</b>!{lev_str}\n"
                 f"• Цена лимита: ${limit_price:,.4f}\n"
@@ -625,11 +627,11 @@ def place_scalping_order(user_id, pair, entry_price, trading_mode, size_usdt, ma
             )
 
 
-def close_live_position(user_id, pair, amount, market_type="SPOT", order_side="BUY"):
+def close_live_position(pair, amount, market_type="SPOT", order_side="BUY"):
     """
     Выполняет реальную рыночную продажу или покупку на Binance для закрытия позиции.
     """
-    user = db.get_user_by_id(user_id)
+    user = db.get_settings()
     if not user:
         return False
         
@@ -642,7 +644,7 @@ def close_live_position(user_id, pair, amount, market_type="SPOT", order_side="B
     close_side = "SELL" if order_side.upper() == "BUY" else "BUY"
     
     qty = format_quantity(pair, amount, market_type)
-    print(f"Placing LIVE Binance Market {close_side} order to close position for user {user_id} - {pair} (Qty: {qty}, Market: {market_type})")
+    print(f"Placing LIVE Binance Market {close_side} order to close position  - {pair} (Qty: {qty}, Market: {market_type})")
     
     params = {
         "symbol": pair.upper(),
@@ -664,19 +666,64 @@ def close_live_position(user_id, pair, amount, market_type="SPOT", order_side="B
         print(f"Error placing Binance LIVE close order: {e}")
         return False
 
+def liquidate_order_manually(order_id):
+    """
+    Закрывает ордер вручную по запросу пользователя.
+    """
+    orders = db.get_active_orders()
+    target_order = next((o for o in orders if str(o["id"]) == str(order_id)), None)
+    
+    if not target_order:
+        print(f"Order {order_id} not found or already closed.")
+        return False
+        
+    pair = target_order["pair"]
+    market_type = target_order.get("market_type", "SPOT")
+    trading_mode = target_order.get("trading_mode", "DEMO")
+    amount = float(target_order["amount"])
+    entry = float(target_order["entry_price"])
+    side = target_order["side"]
+
+    current_price = fetch_current_price(pair, market_type)
+    if current_price is None or current_price <= 0:
+        print(f"Cannot liquidate order {order_id}: unable to fetch current price for {pair}.")
+        return False
+        
+    # Расчет PnL
+    if side == "BUY":
+        pnl = amount * (current_price - entry)
+    else:
+        pnl = amount * (entry - current_price)
+        
+    if trading_mode == "LIVE":
+        success = close_live_position(pair, amount, market_type, side)
+        if not success:
+            print(f"Failed to close LIVE position for order {order_id}.")
+            return False
+            
+    # Сохраняем в БД
+    db.close_order(order_id, status="CLOSED_MANUAL", close_price=current_price, pnl=pnl)
+    print(f"Order {order_id} manually liquidated at {current_price} with PnL {pnl:.2f}")
+    
+    # Отправляем уведомление
+    pnl_emoji = "🟢" if pnl >= 0 else "🔴"
+    send_notification(f"{pnl_emoji} <b>Ордер закрыт вручную</b>\n\nПара: {pair}\nТип: {side}\nВход: ${entry:,.4f}\nВыход: ${current_price:,.4f}\nPnL: ${pnl:,.2f}")
+    return True
+
 
 # =====================================================================
 # 3. ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
 # =====================================================================
 def fetch_binance_klines(symbol, timeframe, limit=100, market_type="SPOT"):
-    """Запрашивает публичную историю свечей с Binance API (Spot или Futures) с кешированием на 10.0 секунд."""
+    """Запрашивает публичную историю свечей с Binance API (Spot или Futures) с кешированием."""
     symbol = symbol.upper()
     market_type = market_type.upper()
+    
     cache_key = (symbol, timeframe, limit, market_type)
     now = time.time()
     if cache_key in _klines_cache:
         cached_time, cached_data = _klines_cache[cache_key]
-        if now - cached_time < 10.0:
+        if now - cached_time < 1.0:
             return cached_data
             
     use_us = os.environ.get("USE_BINANCE_US", "False").lower() == "true"
@@ -703,14 +750,15 @@ def fetch_binance_klines(symbol, timeframe, limit=100, market_type="SPOT"):
         raise e
 
 def fetch_current_price(symbol, market_type="SPOT"):
-    """Запрашивает текущую тикерную цену с Binance API (Spot или Futures) с кешированием на 2.0 секунды."""
+    """Запрашивает текущую тикерную цену с Binance API (Spot или Futures) с кешированием на 1.0 секунду."""
     symbol = symbol.upper()
     market_type = market_type.upper()
     cache_key = (symbol, market_type)
     now = time.time()
+    
     if cache_key in _price_cache:
         cached_time, cached_price = _price_cache[cache_key]
-        if now - cached_time < 0.5:
+        if now - cached_time < 0.3:
             return cached_price
             
     try:
@@ -736,45 +784,48 @@ def fetch_current_price(symbol, market_type="SPOT"):
             return 1650.0
         return 1.0
 
-def send_telegram_notification(user_id, message):
+def send_notification(message):
     """
-    Отправляет уведомление в Telegram пользователя, если указаны Bot Token и Chat ID.
+    Выводит уведомление в консоль (логирование событий терминала).
     """
-    user = db.get_user_by_id(user_id)
-    if not user:
-        return
-        
-    settings = db.get_user_settings(user_id)
-    if settings and not dict(settings).get("telegram_notifications", 1):
-        return
-        
-    try:
-        bot_token = user["telegram_bot_token"]
-        chat_id = user["telegram_chat_id"]
-    except (IndexError, KeyError):
-        return
-        
-    if not bot_token or not chat_id:
-        return
-        
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": message,
-        "parse_mode": "HTML"
-    }
-    try:
-        res = requests.post(url, json=payload, timeout=10)
-        if res.status_code != 200:
-            print(f"Telegram API error for user {user_id}: {res.text}")
-    except Exception as e:
-        print(f"Failed to send Telegram notification: {e}")
+    clean_msg = message.replace("<b>", "").replace("</b>", "").replace("🟢", "").replace("🔴", "").replace("🔵", "").replace("⚠️", "").replace("🚀", "")
+    print(f"[NOTIFICATION] {clean_msg.strip()}")
+
+# Совместимость со старыми вызовами
+send_notification = send_notification
 
 
-def get_ai_trailing_distance_pct(user_id, pair, timeframe, market_type):
+def check_and_reload_models():
+    """
+    Проверяет, соответствуют ли загруженные в память модели текущей паре и таймфрейму в настройках.
+    Если нет, загружает их с диска (или обучает на синтетических данных и сохраняет).
+    """
+    settings = db.get_settings()
+    if not settings:
+        return
+    
+    pair = (dict(settings).get("trading_pair", "BTCUSDT") or "BTCUSDT").upper()
+    timeframe = dict(settings).get("timeframe", "1m") or "1m"
+    
+    current_pair = getattr(scalping_ensemble, "current_model_pair", None)
+    current_tf = getattr(scalping_ensemble, "current_model_timeframe", None)
+    
+    if current_pair != pair or current_tf != timeframe:
+        print(f"\n=== [ИИ] ОБНАРУЖЕНО ИЗМЕНЕНИЕ НАСТРОЕК: ПЕРЕКЛЮЧЕНИЕ С {current_pair} ({current_tf}) НА {pair} ({timeframe}) ===")
+        # 1. Попытка загрузить модели с диска
+        if not scalping_ensemble.load_models_from_disk(pair, timeframe):
+            # 2. Если моделей нет на диске, запускаем виртуальное ускоренное обучение на реальной истории рынка
+            scalping_ensemble.bootstrap_virtual_training(pair, timeframe)
+        # Модели с диска уже обучены — дополнительный ретрейн не нужен.
+        # Плановый ретрейн произойдёт через RETRAIN_INTERVAL (30 мин).
+        print(f"=== [ИИ] МОДЕЛИ УСПЕШНО НАСТРОЕНЫ ДЛЯ РАБОТЫ С {pair} ({timeframe}) ===\n")
+
+
+def get_ai_trailing_distance_pct(pair, timeframe, market_type):
     """
     Рассчитывает динамический отступ для трейлинг-стопа на базе ИИ.
     """
+    check_and_reload_models()
     try:
         klines = fetch_binance_klines(pair, timeframe, limit=100, market_type=market_type)
         if not klines:
@@ -817,7 +868,9 @@ def get_ai_trailing_distance_pct(user_id, pair, timeframe, market_type):
             current_row["cvd"],
             pred_change_1m,
             pred_change_2m,
-            current_hour
+            current_hour,
+            current_row.get("vwap_dist", 0.0),
+            current_row.get("macd_hist_norm", 0.0)
         ])
         
         # Predict dynamic percentage (e.g. standard deviation)
@@ -834,13 +887,14 @@ def get_ai_trailing_distance_pct(user_id, pair, timeframe, market_type):
 # =====================================================================
 # 4. ЦИКЛ СКАЛЬПИНГА ПОЛЬЗОВАТЕЛЯ
 # =====================================================================
-def run_user_scalping_cycle(user_id):
+def run_user_scalping_cycle():
     """
     Запускает 1-минутный инференс моделей DLinear + LightGBM/NumPy
     для конкретного пользователя по его торговой паре.
     """
-    user = db.get_user_by_id(user_id)
-    settings = db.get_user_settings(user_id)
+    check_and_reload_models()
+    user = db.get_settings()
+    settings = db.get_settings()
     if not user or not settings or not settings["bot_enabled"]:
         return
         
@@ -849,10 +903,10 @@ def run_user_scalping_cycle(user_id):
     trading_mode = settings["trading_mode"] or "DEMO"
     market_type = dict(settings).get("market_type", "SPOT") or "SPOT"
     futures_leverage = dict(settings).get("futures_leverage", 10) or 10
-    order_size_usdt = resolve_order_size(user_id, settings["order_size_usdt"], trading_mode, market_type)
+    order_size_usdt = resolve_order_size(settings["order_size_usdt"], trading_mode, market_type)
     
     # Проверка, нет ли уже открытой сделки по этой паре у пользователя
-    active_orders = db.get_active_orders(user_id)
+    active_orders = db.get_active_orders()
     active_pairs = [o["pair"].upper() for o in active_orders]
     if pair.upper() in active_pairs:
         return
@@ -918,13 +972,19 @@ def run_user_scalping_cycle(user_id):
         pred_change_2m = dlinear_pred[1]
         
         # Инференс Классификатора
+        current_time_ms = float(klines[-1][0])
+        current_hour = pd.to_datetime(current_time_ms, unit='ms').hour / 24.0
+
         features = np.array([[
             current_rsi_norm,
             current_atr_pct,
             current_obi,
             current_cvd,
             pred_change_1m,
-            pred_change_2m
+            pred_change_2m,
+            current_hour,
+            current_row.get("vwap_dist", 0.0),
+            current_row.get("macd_hist_norm", 0.0)
         ]])
         
         prob = scalping_ensemble.classifier_model.predict(features)[0]
@@ -956,7 +1016,6 @@ def run_user_scalping_cycle(user_id):
         # Persist analysis log with dedup/timestamp guard to avoid DB spam
         try:
             db.add_analysis_log_if_needed(
-                user_id=user_id,
                 pair=pair,
                 indicators_summary=indicators_str,
                 stage1=stage1_out,
@@ -968,19 +1027,22 @@ def run_user_scalping_cycle(user_id):
             print(f"Failed to persist analysis log (non-fatal): {e}")
         
         if vol_blocked:
-            print(f"[VOLATILITY BLOCKED] User {user_id} ({pair}) - current ATR: {current_atr:.4f} > 4x Hourly Avg ({mean_hourly_atr:.4f})")
+            print(f"[VOLATILITY BLOCKED] ({pair}) - current ATR: {current_atr:.4f} > 4x Hourly Avg ({mean_hourly_atr:.4f})")
             return
             
-        print(f"Scalper Bot for User {user_id} - Pair: {pair} - Close: {current_close:.2f} - Prob: {prob:.4f}")
+        print(f"Scalper Bot for Pair: {pair} - Close: {current_close:.2f} - Prob: {prob:.4f}")
         
     except Exception as e:
-        print(f"Error in run_user_scalping_cycle for user {user_id}: {e}")
+        print(f"Error in run_user_scalping_cycle : {e}")
 
 
-def evaluate_market_signal(user_id, persist_log=False, place_order=False):
+def evaluate_market_signal(persist_log=False, place_order=False):
     """Оценивает текущий сигнал нейросети без побочных эффектов, если это не требуется."""
-    user = db.get_user_by_id(user_id)
-    settings = db.get_user_settings(user_id)
+    # Ensure correct models are loaded for the current symbol & timeframe
+    check_and_reload_models()
+
+    user = db.get_settings()
+    settings = db.get_settings()
     if not user or not settings:
         return {"success": False, "error": "User settings not found"}
 
@@ -989,7 +1051,7 @@ def evaluate_market_signal(user_id, persist_log=False, place_order=False):
     trading_mode = settings["trading_mode"] or "DEMO"
     market_type = dict(settings).get("market_type", "SPOT") or "SPOT"
     futures_leverage = dict(settings).get("futures_leverage", 10) or 10
-    order_size_usdt = resolve_order_size(user_id, settings["order_size_usdt"], trading_mode, market_type)
+    order_size_usdt = resolve_order_size(settings["order_size_usdt"], trading_mode, market_type)
 
     active_order = None
     has_existing_pair = False
@@ -998,8 +1060,8 @@ def evaluate_market_signal(user_id, persist_log=False, place_order=False):
     try:
         conn = db.get_db_connection()
         db_orders = conn.execute(
-            "SELECT id FROM orders WHERE user_id = ? AND pair = ? AND (status = 'ACTIVE' OR status = 'PENDING') ORDER BY created_at DESC",
-            (user_id, pair)
+            "SELECT id FROM orders WHERE pair = ? AND (status = 'ACTIVE' OR status = 'PENDING') ORDER BY created_at DESC",
+            (pair,)
         ).fetchall()
         if len(db_orders) > 1:
             ids_to_cancel = [row["id"] for row in db_orders[1:]]
@@ -1013,11 +1075,11 @@ def evaluate_market_signal(user_id, persist_log=False, place_order=False):
 
     if trading_mode == "LIVE":
         # Check real active positions and open orders on Binance
-        live_positions = fetch_live_positions(user_id, market_type)
-        live_open_orders = fetch_live_open_orders(user_id, market_type)
+        live_positions = fetch_live_positions(market_type)
+        live_open_orders = fetch_live_open_orders(market_type)
         
         # Also check local DB for local pending limit orders
-        local_orders = db.get_active_orders(user_id)
+        local_orders = db.get_active_orders()
         
         # If there's an active position on Binance for this pair
         for pos in live_positions:
@@ -1038,7 +1100,7 @@ def evaluate_market_signal(user_id, persist_log=False, place_order=False):
                     break
     else:
         # DEMO Mode: check local DB active orders
-        active_orders = db.get_active_orders(user_id)
+        active_orders = db.get_active_orders()
         for o in active_orders:
             if o["pair"].upper() == pair.upper():
                 has_existing_pair = True
@@ -1079,15 +1141,15 @@ def evaluate_market_signal(user_id, persist_log=False, place_order=False):
 
         trend_direction = "UP"
         try:
-            klines_trend = fetch_binance_klines(pair, timeframe, limit=250, market_type=market_type)
-            if len(klines_trend) >= 200:
+            klines_trend = fetch_binance_klines(pair, timeframe, limit=500, market_type=market_type)
+            if len(klines_trend) >= 50:
                 closes_trend = pd.Series([float(k[4]) for k in klines_trend])
-                ema_200 = closes_trend.ewm(span=200, adjust=False).mean().iloc[-1]
+                ema_50 = closes_trend.ewm(span=50, adjust=False).mean().iloc[-1]
                 last_close_val = closes_trend.iloc[-1]
-                if last_close_val < ema_200:
+                if last_close_val < ema_50:
                     trend_direction = "DOWN"
         except Exception as te:
-            print(f"Error calculating EMA 200 trend filter: {te}")
+            print(f"Error calculating EMA 50 trend filter: {te}")
 
         closes_60 = df["close"].iloc[-60:].values
         last_close = closes_60[-1]
@@ -1097,6 +1159,7 @@ def evaluate_market_signal(user_id, persist_log=False, place_order=False):
         # не привёл к UnboundLocalError при формировании ответа.
         action = "HOLD"
         reason = "Ожидание сигнала."
+        reason2 = ""
 
         if scalping_ensemble.HAS_TORCH:
             import torch
@@ -1120,7 +1183,9 @@ def evaluate_market_signal(user_id, persist_log=False, place_order=False):
             current_cvd,
             pred_change_1m,
             pred_change_2m,
-            current_hour
+            current_hour,
+            current_row.get("vwap_dist", 0.0),
+            current_row.get("macd_hist_norm", 0.0)
         ]])
 
         prob = float(scalping_ensemble.classifier_model.predict(features)[0])
@@ -1128,28 +1193,32 @@ def evaluate_market_signal(user_id, persist_log=False, place_order=False):
         invert_signal = bool(dict(settings).get("invert_signal", 0))
 
         action = "HOLD"
-        reason = f"Вероятность классификатора: {prob:.4f} <= {threshold:.2f}."
+        reason = f"Вероятность классификатора:"
+        reason2 = f"{prob:.4f} <= {threshold:.2f}."
 
         if vol_blocked:
             action = "HOLD"
-            reason = f"Новостной сквиз: ATR ({current_atr:.4f}) превысил часовой лимит ({4.0 * mean_hourly_atr:.4f})."
+            reason = f"Новостной сквиз: ATR ({current_atr:.4f}) "  
+            reason2 = f"превысил часовой лимит ({4.0 * mean_hourly_atr:.4f})."
         elif prob > threshold:
             if trend_direction == "UP":
                 action = "BUY"
-                reason = f"Сигнал на покупку по тренду! Вероятность {prob:.4f} > {threshold:.2f}."
+                reason = f"Сигнал на покупку по тренду! "
+                reason2 = f"Вероятность {prob:.4f} > {threshold:.2f}."
             else:
                 action = "SELL"
-                reason = f"Сигнал на продажу по тренду! Вероятность {prob:.4f} > {threshold:.2f}."
+                reason = f"Сигнал на продажу по тренду! "
+                reason2 = f"Вероятность {prob:.4f} > {threshold:.2f}."
 
         if invert_signal and action in ["BUY", "SELL"]:
             action = "BUY" if action == "SELL" else "SELL"
-            reason += " Сигнал инвертирован настройкой пользователя."
+            reason += " Сигнал инвертирован"
 
         indicators_str = f"RSI: {current_rsi_norm * 100:.1f}, ATR%: {current_atr_pct * 100:.4f}%, Trend: {trend_direction}"
-        stage1_out = f"1-Minute Scalping Analysis.\nVolatility Filter: {'BLOCKED' if vol_blocked else 'OK'}\nHourly Average ATR: {mean_hourly_atr:.4f}\nCurrent ATR: {current_atr:.4f}\nEMA 200 (5m) Trend Filter: {trend_direction}"
+        stage1_out = f"{timeframe} Scalping Analysis.\nVolatility Filter: {'BLOCKED' if vol_blocked else 'OK'}\nHourly Average ATR: {mean_hourly_atr:.4f}\nCurrent ATR: {current_atr:.4f}\nEMA 50 ({timeframe}) Trend Filter: {trend_direction}"
         stage2_out = f"DLinear Predictions:\n- t+1 Close Change: {pred_change_1m * 100:+.4f}%\n- t+2 Close Change: {pred_change_2m * 100:+.4f}%\n\nClassifier Success Probability: {prob * 100:.2f}%"
 
-        settings_dict = dict(db.get_user_settings(user_id))
+        settings_dict = dict(db.get_settings())
         use_limit_orders = settings_dict.get("use_limit_orders", 1)
 
         order_type_desc = "None"
@@ -1161,13 +1230,13 @@ def evaluate_market_signal(user_id, persist_log=False, place_order=False):
             "price": current_close,
             "probability": prob,
             "reason": reason,
+            "reason2": reason2,
             "order_type": order_type_desc
         }, indent=2, ensure_ascii=False)
 
         if persist_log:
             try:
                 db.add_analysis_log_if_needed(
-                    user_id=user_id,
                     pair=pair,
                     indicators_summary=indicators_str,
                     stage1=stage1_out,
@@ -1177,6 +1246,8 @@ def evaluate_market_signal(user_id, persist_log=False, place_order=False):
                 )
             except Exception as e:
                 print(f"Failed to persist analysis log (non-fatal): {e}")
+
+        # Stagnation retrain отключён — ретрейн только после убытка и по расписанию (1 раз в час).
 
         order_msg = "Рекомендация: HOLD (нет сигнала на вход)."
         if vol_blocked:
@@ -1189,15 +1260,20 @@ def evaluate_market_signal(user_id, persist_log=False, place_order=False):
                 current_side = active_order["side"].upper()
                 pnl = (current_close - entry_price) * amount if current_side == "BUY" else (entry_price - current_close) * amount
                 if trading_mode == "LIVE":
-                    close_live_position(user_id, pair, amount, market_type, order_side=current_side)
-                closed = db.close_order(active_order["id"], "CLOSED_MANUAL", current_close, pnl)
-                if trading_mode == "DEMO" and closed:
-                    user = db.get_user_by_id(user_id)
-                    db.update_user_demo_balance(user_id, user["demo_balance"] + float(active_order["size_usdt"]))
+                    close_live_position(pair, amount, market_type, order_side=current_side)
+                closed = db.close_order(active_order["id"], status="CLOSED_MANUAL", close_price=current_close, pnl=pnl)
+
+                # Check if closed in loss
+                if pnl < 0:
+                    print(f"[LOSS RETRAIN] Position closed in loss due to AI signal switch (PnL: {pnl}). Triggering retraining to adapt.")
+                    try:
+                        scalping_ensemble.retrain_on_market_history(pair, timeframe)
+                    except Exception as re:
+                        print(f"Error retraining models after AI exit loss: {re}")
+
                 
                 pnl_sign = "+" if pnl >= 0 else ""
-                send_telegram_notification(
-                    user_id,
+                send_notification(
                     f"🔄 <b>[{trading_mode} Mode] Позиция закрыта (смена сигнала ИИ)</b>\n\n"
                     f"Пара: <b>{pair}</b>\n"
                     f"Сделка: {current_side}\n"
@@ -1214,7 +1290,7 @@ def evaluate_market_signal(user_id, persist_log=False, place_order=False):
                 order_msg = f"Размещен LIVE {order_type_desc} ордер {action} на Binance по паре {pair} ({market_type})!"
             else:
                 order_msg = f"Размещен DEMO {order_type_desc} ордер {action} по паре {pair} ({market_type})!"
-            place_scalping_order(user_id, pair, current_close, trading_mode, order_size_usdt, market_type, futures_leverage, current_atr, side=action, prob=prob, pred_change_1m=pred_change_1m)
+            place_scalping_order(pair, current_close, trading_mode, order_size_usdt, market_type, futures_leverage, current_atr, side=action, prob=prob, pred_change_1m=pred_change_1m)
 
         # Подготавливаем последний лог для передачи в websocket (не обязательно сохранять в БД)
         created_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
@@ -1224,6 +1300,8 @@ def evaluate_market_signal(user_id, persist_log=False, place_order=False):
             "stage3_output": stage3_out,
             "created_at": created_at
         }
+        global LATEST_LIVE_SIGNAL
+        LATEST_LIVE_SIGNAL = latest_log
 
         return {
             "success": True,
@@ -1242,12 +1320,15 @@ def evaluate_market_signal(user_id, persist_log=False, place_order=False):
         return {"success": False, "error": str(e)}
 
 
-def run_user_analysis_cycle(user_id):
+def run_user_analysis_cycle():
     """
-    Запускает ручной (по кнопке) цикл инференса и анализа для пользователя.
-    Возвращает результат для API в формате словаря.
+    Запускает цикл инференса и анализа для пользователя.
+    Ордер размещается только если автоторговля включена в настройках.
     """
-    result = evaluate_market_signal(user_id, persist_log=True, place_order=True)
+    settings_row = db.get_settings()
+    bot_enabled = (settings_row.get("bot_enabled", 0) == 1) if settings_row else False
+    
+    result = evaluate_market_signal(persist_log=True, place_order=bot_enabled)
     if not result.get("success"):
         return result
     return result
@@ -1341,14 +1422,14 @@ def run_market_simulator():
                         triggered = True
                         
                     if triggered:
-                        user = db.get_user_by_id(user_id)
+                        user = db.get_settings()
                         if trading_mode == "LIVE" and user:
                             # Place real MARKET order on Binance to execute this virtual limit order
                             api_key = user["binance_api_key"]
                             api_secret = user["binance_api_secret"]
                             if api_key and api_secret:
                                 # Get leverage from settings
-                                u_settings = db.get_user_settings(user_id)
+                                u_settings = db.get_settings()
                                 u_lev = dict(u_settings).get("futures_leverage", 10) or 10
                                 
                                 if market_type.upper() == "FUTURES":
@@ -1405,8 +1486,7 @@ def run_market_simulator():
                                         db.upload_db_to_hf_async()
                                         
                                         lev_str = f" | Плечо: {u_lev}x" if market_type.upper() == "FUTURES" else ""
-                                        send_telegram_notification(
-                                            user_id,
+                                        send_notification(
                                             f"🔔 <b>[LIVE Mode] Локальный лимитный ордер активирован на Binance ({market_type})</b>\n\n"
                                             f"🚀 Сделка: <b>{side}</b> на <b>{pair}</b>{lev_str}\n"
                                             f"• Кол-во: {qty}\n"
@@ -1423,8 +1503,7 @@ def run_market_simulator():
                             activated = db.activate_pending_order(order_id)
                             if activated:
                                 print(f"[LIMIT ACTIVATED] Pending order {order_id} activated at entry price {entry}")
-                                send_telegram_notification(
-                                    user_id,
+                                send_notification(
                                     f"🔔 <b>[DEMO Mode] Лимитный ордер активирован</b>\n\n"
                                     f"Пара: <b>{pair}</b>\n"
                                     f"Цена исполнения: ${entry:,.4f}"
@@ -1432,7 +1511,7 @@ def run_market_simulator():
                     continue  # do not check TP/SL on the same tick it activates
                 
                 # --- Trailing Stop Logic ---
-                settings_dict = dict(db.get_user_settings(user_id))
+                settings_dict = dict(db.get_settings())
                 use_trailing = settings_dict.get("use_trailing_stop", 1)
                 
                 if use_trailing and sl:
@@ -1440,7 +1519,7 @@ def run_market_simulator():
                     timeframe = settings_dict.get("timeframe", "1m") or "1m"
                     if use_ai_trailing:
                         # Получаем динамический отступ от ИИ
-                        ai_dist_pct = get_ai_trailing_distance_pct(user_id, pair, timeframe, market_type)
+                        ai_dist_pct = get_ai_trailing_distance_pct(pair, timeframe, market_type)
                         trailing_step_pct = ai_dist_pct if ai_dist_pct is not None else settings_dict.get("trailing_step_pct", 0.2)
                         trailing_activation_pct = trailing_step_pct * 1.5
                     else:
@@ -1498,22 +1577,21 @@ def run_market_simulator():
                         close_trigger_price = tp
                         
                 if closed:
-                    print(f"Closing position for user {user_id} - Order {order_id} status {status} PnL {pnl}")
+                    print(f"Closing position  - Order {order_id} status {status} PnL {pnl}")
                     
                     if trading_mode == "LIVE":
                         # Закрываем реальную позицию на Binance
-                        success = close_live_position(user_id, pair, amount, market_type, order_side=side)
+                        success = close_live_position(pair, amount, market_type, order_side=side)
                         if not success:
                             print(f"Failed to execute LIVE close order on Binance for order {order_id}. Closing in DB anyway.")
                             
                         # Закрываем ордер в БД (demo_balance не обновляется, т.к. trading_mode='LIVE')
-                        db_closed = db.close_order(order_id, status, close_trigger_price, pnl)
+                        db_closed = db.close_order(order_id, status=status, close_price=close_trigger_price, pnl=pnl)
                         
                         if db_closed:
                             pnl_sign = "+" if pnl >= 0 else ""
                             emoji = "🔴" if status == "CLOSED_SL" else "🔵"
-                            send_telegram_notification(
-                                user_id,
+                            send_notification(
                                 f"{emoji} <b>[LIVE Mode] Позиция закрыта ({status.replace('CLOSED_', '')})</b>\n\n"
                                 f"Пара: <b>{pair}</b>\n"
                                 f"Сделка: BUY\n"
@@ -1522,28 +1600,33 @@ def run_market_simulator():
                                 f"Чистый PnL: <b>{pnl_sign}${pnl:,.2f}</b>"
                             )
                     else:  # DEMO mode
-                        db_closed = db.close_order(order_id, status, close_trigger_price, pnl)
+                        db_closed = db.close_order(order_id, status=status, close_price=close_trigger_price, pnl=pnl)
                         if db_closed:
-                            # Возвращаем залог (коллатерал) + PnL в демо-баланс
-                            user = db.get_user_by_id(user_id)
-                            db.update_user_demo_balance(user_id, user["demo_balance"] + size_usdt)
-                            
                             pnl_sign = "+" if pnl >= 0 else ""
                             emoji = "🔴" if status == "CLOSED_SL" else "🔵"
-                            send_telegram_notification(
-                                user_id,
+                            send_notification(
                                 f"{emoji} <b>[DEMO Mode] Ордер закрыт ({status.replace('CLOSED_', '')})</b>\n\n"
                                 f"Пара: <b>{pair}</b>\n"
                                 f"Цена входа: ${entry:,.4f}\n"
                                 f"Цена закрытия: ${close_trigger_price:,.4f}\n"
                                 f"Профит/Убыток: <b>{pnl_sign}${pnl:,.2f}</b>"
                             )
+
+                    # Check if closed in loss
+                    if pnl < 0:
+                        print(f"[LOSS RETRAIN] Position closed in loss (PnL: {pnl}). Triggering retraining to adapt.")
+                        try:
+                            settings = db.get_settings()
+                            tf = (dict(settings).get("timeframe") or "3m") if settings else "3m"
+                            scalping_ensemble.retrain_on_market_history(pair, tf)
+                        except Exception as re:
+                            print(f"Error retraining models after losing trade: {re}")
                         
-            time.sleep(5)  # проверяем чаще для 1-минутного таймфрейма
+            time.sleep(0.5)  # проверяем чаще для 1-минутного таймфрейма
             
         except Exception as e:
             print(f"Error in market simulator loop: {e}")
-            time.sleep(5)
+            time.sleep(0.5)
 
 
 def run_automated_trading_bot():
@@ -1564,12 +1647,18 @@ def run_automated_trading_bot():
         "1h": 3600
     }
     
-    last_retrain_time = 0
-    RETRAIN_INTERVAL = 1800  # Дообучать модели каждые 30 минут
+    last_retrain_time = time.time()
+    RETRAIN_INTERVAL = 3600  # Дообучать модели раз в час
     
     while not _stop_event.is_set():
         try:
-            active_bots = db.get_all_active_bot_settings()
+            settings_row = db.get_settings()
+            if settings_row:
+                bot_info = dict(settings_row)
+                bot_info["user_id"] = 0
+                active_bots = [bot_info]
+            else:
+                active_bots = []
             current_time = time.time()
             
             # Периодическое самообучение на истории
@@ -1588,13 +1677,13 @@ def run_automated_trading_bot():
                 pair = bot["trading_pair"]
                 timeframe = bot["timeframe"] or "1m"
                 
-                # Опрашиваем локальный кеш / Binance раз в 2.0 секунды для мгновенного входа по сигналам
-                interval_sec = 2.0
+                # Опрашиваем локальный кеш / Binance раз в 1.0 секунду для мгновенного входа по сигналам
+                interval_sec = 1.0
                 last_run = last_run_times.get(user_id, 0)
                 
                 if current_time - last_run >= interval_sec:
                     try:
-                        run_user_analysis_cycle(user_id)
+                        run_user_analysis_cycle()
                     except Exception as e:
                         print(f"Error running user analysis cycle for {user_id}: {e}")
                     last_run_times[user_id] = current_time
@@ -1620,8 +1709,15 @@ def start_bot_scheduler():
     
     # 2. Обучение моделей DLinear и LightGBM/NumPyClassifier
     print("Инициализация моделей скальпинга...")
-    historical_df = scalping_ensemble.generate_synthetic_data(num_candles=2500)
-    scalping_ensemble.train_models(historical_df)
+    settings = db.get_settings()
+    pair = (dict(settings).get("trading_pair", "BTCUSDT") or "BTCUSDT").upper()
+    timeframe = dict(settings).get("timeframe", "1m") or "1m"
+    
+    if not scalping_ensemble.load_models_from_disk(pair, timeframe):
+        print(f"Сохраненные модели для {pair} ({timeframe}) не найдены. Запускаем виртуальное бутстрап-обучение на реальной истории...")
+        scalping_ensemble.bootstrap_virtual_training(pair, timeframe)
+    else:
+        print(f"Модели для {pair} ({timeframe}) успешно загружены с диска.")
     
     _stop_event.clear()
     

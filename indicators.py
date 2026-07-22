@@ -195,17 +195,34 @@ def get_latest_indicators(klines):
     upper_bb, mid_bb, lower_bb = calculate_bollinger_bands(closes, 20, 2)
     atr = calculate_atr(highs, lows, closes, 14)
     
+    current_price = closes[-1]
+    atr_val = atr[-1]
+    atr_pct = (atr_val / current_price * 100) if current_price else 0.0
+    
+    # Calculate simple Bollinger Band signal
+    bb_u = upper_bb[-1]
+    bb_l = lower_bb[-1]
+    bb_m = mid_bb[-1]
+    if current_price > bb_u:
+        bb_sig = "Overbought"
+    elif current_price < bb_l:
+        bb_sig = "Oversold"
+    else:
+        bb_sig = "Neutral"
+        
     return {
-        "current_price": closes[-1],
+        "current_price": current_price,
         "ema9": ema9[-1],
         "ema21": ema21[-1],
         "ema50": ema50[-1],
         "rsi": rsi[-1],
-        "macd": macd_line[-1],
+        "macd": f"{macd_line[-1]:.2f}" if macd_line[-1] is not None else "N/A",
         "macd_signal": signal_line[-1],
         "macd_hist": histogram[-1],
-        "bb_upper": upper_bb[-1],
-        "bb_middle": mid_bb[-1],
-        "bb_lower": lower_bb[-1],
-        "atr": atr[-1]
+        "bb_upper": bb_u,
+        "bb_middle": bb_m,
+        "bb_lower": bb_l,
+        "bb_signal": bb_sig,
+        "atr": atr_val,
+        "atr_pct": atr_pct
     }

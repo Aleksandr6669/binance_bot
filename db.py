@@ -25,25 +25,16 @@ def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Users table
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE NOT NULL,
-        password_hash TEXT NOT NULL,
+    # Settings table (now holds everything including API keys and balance)
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS settings (
+        id INTEGER PRIMARY KEY DEFAULT 1,
         gemini_api_key TEXT,
         binance_api_key TEXT,
         binance_api_secret TEXT,
         telegram_chat_id TEXT,
         telegram_bot_token TEXT,
-        demo_balance REAL DEFAULT 10000.0
-    )
-    """)
-    
-    # Settings table
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS settings (
-        user_id INTEGER PRIMARY KEY,
+        demo_balance REAL DEFAULT 10000.0,
         trading_pair TEXT DEFAULT 'BTCUSDT',
         timeframe TEXT DEFAULT '15m',
         order_size_usdt REAL DEFAULT 100.0,
@@ -51,15 +42,76 @@ def init_db():
         trading_mode TEXT DEFAULT 'DEMO',
         market_type TEXT DEFAULT 'SPOT',
         futures_leverage INTEGER DEFAULT 10,
-        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        ui_language TEXT DEFAULT 'RU',
+        ui_auto_center INTEGER DEFAULT 1,
+        min_probability_threshold REAL DEFAULT 0.88,
+        bot_started_at TEXT,
+        invert_signal INTEGER DEFAULT 0,
+        use_limit_orders INTEGER DEFAULT 1,
+        use_trailing_stop INTEGER DEFAULT 1,
+        use_ai_limit_price INTEGER DEFAULT 0,
+        trailing_activation_pct REAL DEFAULT 0.5,
+        trailing_step_pct REAL DEFAULT 0.2,
+        use_ai_trailing INTEGER DEFAULT 0,
+        use_ai_exit INTEGER DEFAULT 0,
+        daily_loss_limit REAL DEFAULT 0.0,
+        daily_profit_target REAL DEFAULT 0.0
     )
-    """)
+    ''')
+    # Add columns if they don't exist (for older databases)
+    migrations = [
+        "ALTER TABLE settings ADD COLUMN daily_loss_limit REAL DEFAULT 0.0",
+        "ALTER TABLE settings ADD COLUMN daily_profit_target REAL DEFAULT 0.0",
+        "ALTER TABLE settings ADD COLUMN use_ai_exit INTEGER DEFAULT 0",
+        "ALTER TABLE settings ADD COLUMN use_ai_trailing INTEGER DEFAULT 0",
+        "ALTER TABLE settings ADD COLUMN use_ai_limit_price INTEGER DEFAULT 0",
+        "ALTER TABLE settings ADD COLUMN trailing_activation_pct REAL DEFAULT 0.5",
+        "ALTER TABLE settings ADD COLUMN trailing_step_pct REAL DEFAULT 0.2",
+        "ALTER TABLE settings ADD COLUMN invert_signal INTEGER DEFAULT 0",
+        "ALTER TABLE settings ADD COLUMN use_limit_orders INTEGER DEFAULT 1",
+        "ALTER TABLE settings ADD COLUMN use_trailing_stop INTEGER DEFAULT 1",
+        "ALTER TABLE settings ADD COLUMN min_probability_threshold REAL DEFAULT 0.88",
+        "ALTER TABLE settings ADD COLUMN market_type TEXT DEFAULT 'SPOT'",
+        "ALTER TABLE settings ADD COLUMN futures_leverage INTEGER DEFAULT 10",
+        "ALTER TABLE settings ADD COLUMN use_proxy INTEGER DEFAULT 0",
+        "ALTER TABLE settings ADD COLUMN proxy_url TEXT",
+        "ALTER TABLE orders ADD COLUMN user_id INTEGER DEFAULT 0",
+        "ALTER TABLE orders ADD COLUMN trailing_distance REAL",
+        "ALTER TABLE orders ADD COLUMN leverage INTEGER DEFAULT 1",
+        "ALTER TABLE orders ADD COLUMN market_type TEXT DEFAULT 'SPOT'",
+        "ALTER TABLE orders ADD COLUMN trading_mode TEXT DEFAULT 'DEMO'",
+        "ALTER TABLE orders ADD COLUMN timeframe TEXT",
+    ]
+    for sql in migrations:
+        try:
+            cursor.execute(sql)
+        except Exception:
+            pass  # Column already exists
+
+    # Market candles table for model retraining
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS market_candles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        pair TEXT NOT NULL,
+        timeframe TEXT NOT NULL,
+        open_time INTEGER UNIQUE,
+        open REAL,
+        high REAL,
+        low REAL,
+        close REAL,
+        volume REAL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+
+    # Insert default settings row if it doesn't exist
+    cursor.execute("INSERT OR IGNORE INTO settings (id) VALUES (1)")
     
     # Orders table
-    cursor.execute("""
+    cursor.execute('''
     CREATE TABLE IF NOT EXISTS orders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
+        user_id INTEGER DEFAULT 0,
         pair TEXT NOT NULL,
         side TEXT NOT NULL,
         entry_price REAL NOT NULL,
@@ -68,455 +120,189 @@ def init_db():
         amount REAL NOT NULL,
         size_usdt REAL NOT NULL,
         leverage INTEGER DEFAULT 1,
-        status TEXT NOT NULL DEFAULT 'ACTIVE', -- ACTIVE, CLOSED_TP, CLOSED_SL, CLOSED_MANUAL
+        status TEXT NOT NULL DEFAULT 'ACTIVE',
         pnl REAL DEFAULT 0.0,
+        close_price REAL,
         trading_mode TEXT DEFAULT 'DEMO',
         market_type TEXT DEFAULT 'SPOT',
+        trailing_distance REAL,
+        timeframe TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        closed_at TIMESTAMP,
-        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        closed_at TIMESTAMP
     )
-    """)
+    ''')
     
     # Analysis Logs table
-    cursor.execute("""
+    cursor.execute('''
     CREATE TABLE IF NOT EXISTS analysis_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
         pair TEXT NOT NULL,
         indicators_summary TEXT,
         stage1_output TEXT,
         stage2_output TEXT,
         stage3_output TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
-    """)
+    ''')
     
-    # Dynamic migration to add telegram_bot_token if it doesn't exist in existing database
+    # Migration: check if close_price exists in orders table
     try:
-        cursor.execute("ALTER TABLE users ADD COLUMN telegram_bot_token TEXT")
+        cursor.execute("SELECT close_price FROM orders LIMIT 1")
     except sqlite3.OperationalError:
-        pass
+        cursor.execute("ALTER TABLE orders ADD COLUMN close_price REAL")
         
-    # Dynamic migration to add trading_mode if it doesn't exist in existing database
-    try:
-        cursor.execute("ALTER TABLE settings ADD COLUMN trading_mode TEXT DEFAULT 'DEMO'")
-    except sqlite3.OperationalError:
-        pass
-        
-    # Dynamic migration to add trading_mode to orders table
-    try:
-        cursor.execute("ALTER TABLE orders ADD COLUMN trading_mode TEXT DEFAULT 'DEMO'")
-    except sqlite3.OperationalError:
-        pass
-        
-    # Dynamic migration for UI settings
-    try:
-        cursor.execute("ALTER TABLE settings ADD COLUMN ui_language TEXT DEFAULT 'RU'")
-    except sqlite3.OperationalError:
-        pass
-        
-    try:
-        cursor.execute("ALTER TABLE settings ADD COLUMN ui_auto_center INTEGER DEFAULT 1")
-    except sqlite3.OperationalError:
-        pass
-        
-    # Dynamic migration to add market_type to settings table
-    try:
-        cursor.execute("ALTER TABLE settings ADD COLUMN market_type TEXT DEFAULT 'SPOT'")
-    except sqlite3.OperationalError:
-        pass
-
-    # Dynamic migration to add futures_leverage to settings table
-    try:
-        cursor.execute("ALTER TABLE settings ADD COLUMN futures_leverage INTEGER DEFAULT 10")
-    except sqlite3.OperationalError:
-        pass
-        
-    # Dynamic migration to add market_type to orders table
-    try:
-        cursor.execute("ALTER TABLE orders ADD COLUMN market_type TEXT DEFAULT 'SPOT'")
-    except sqlite3.OperationalError:
-        pass
-
-    # Dynamic migration to add leverage to orders table
-    try:
-        cursor.execute("ALTER TABLE orders ADD COLUMN leverage INTEGER DEFAULT 1")
-    except sqlite3.OperationalError:
-        pass
-        
-    # Dynamic migration to add min_probability_threshold to settings table
-    try:
-        cursor.execute("ALTER TABLE settings ADD COLUMN min_probability_threshold REAL DEFAULT 0.88")
-    except sqlite3.OperationalError:
-        pass
-
-    # Dynamic migration to add bot start timestamp to settings table
-    try:
-        cursor.execute("ALTER TABLE settings ADD COLUMN bot_started_at TEXT")
-    except sqlite3.OperationalError:
-        pass
-
-    # Dynamic migration to add invert signal flag to settings table
-    try:
-        cursor.execute("ALTER TABLE settings ADD COLUMN invert_signal INTEGER DEFAULT 0")
-    except sqlite3.OperationalError:
-        pass
-
-    # Dynamic migration to add use_limit_orders flag to settings table
-    try:
-        cursor.execute("ALTER TABLE settings ADD COLUMN use_limit_orders INTEGER DEFAULT 1")
-    except sqlite3.OperationalError:
-        pass
-        
-    # Dynamic migration to add use_trailing_stop flag to settings table
-    try:
-        cursor.execute("ALTER TABLE settings ADD COLUMN use_trailing_stop INTEGER DEFAULT 1")
-    except sqlite3.OperationalError:
-        pass
-
-    # Dynamic migration to add use_ai_limit_price flag to settings table
-    try:
-        cursor.execute("ALTER TABLE settings ADD COLUMN use_ai_limit_price INTEGER DEFAULT 0")
-    except sqlite3.OperationalError:
-        pass
-
-    # Dynamic migration to add trailing_distance to orders table
-    try:
-        cursor.execute("ALTER TABLE orders ADD COLUMN trailing_distance REAL")
-    except sqlite3.OperationalError:
-        pass
-        
-    # Dynamic migrations for trailing configuration in settings
-    try:
-        cursor.execute("ALTER TABLE settings ADD COLUMN trailing_activation_pct REAL DEFAULT 0.5")
-    except sqlite3.OperationalError:
-        pass
-    try:
-        cursor.execute("ALTER TABLE settings ADD COLUMN trailing_step_pct REAL DEFAULT 0.2")
-    except sqlite3.OperationalError:
-        pass
-    try:
-        cursor.execute("ALTER TABLE settings ADD COLUMN use_ai_exit INTEGER DEFAULT 0")
-    except sqlite3.OperationalError:
-        pass
-    try:
-        cursor.execute("ALTER TABLE settings ADD COLUMN use_ai_trailing INTEGER DEFAULT 0")
-    except sqlite3.OperationalError:
-        pass
-    try:
-        cursor.execute("ALTER TABLE settings ADD COLUMN telegram_notifications INTEGER DEFAULT 1")
-    except sqlite3.OperationalError:
-        pass
-
-    # Table to store real market candlesticks for dynamic training (self-learning)
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS market_history (
-        pair TEXT NOT NULL,
-        timeframe TEXT NOT NULL,
-        open_time INTEGER NOT NULL,
-        open REAL NOT NULL,
-        high REAL NOT NULL,
-        low REAL NOT NULL,
-        close REAL NOT NULL,
-        volume REAL NOT NULL,
-        PRIMARY KEY(pair, timeframe, open_time)
-    )
-    """)
-    
     conn.commit()
     conn.close()
 
-# --- Market History Helpers (Self-Learning) ---
-
-def save_market_candle(pair, timeframe, open_time, o, h, l, c, v):
+def update_api_keys(gemini_api_key, binance_api_key, binance_api_secret, use_proxy, proxy_url):
     conn = get_db_connection()
     conn.execute(
-        """INSERT OR REPLACE INTO market_history (pair, timeframe, open_time, open, high, low, close, volume)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        (pair.upper(), timeframe, open_time, float(o), float(h), float(l), float(c), float(v))
-    )
-    conn.commit()
-    conn.close()
-
-def get_market_history(pair, timeframe, limit=3000):
-    conn = get_db_connection()
-    rows = conn.execute(
-        """SELECT * FROM market_history 
-           WHERE pair = ? AND timeframe = ? 
-           ORDER BY open_time DESC LIMIT ?""",
-        (pair.upper(), timeframe, limit)
-    )
-    results = rows.fetchall()
-    conn.close()
-    # Reverse so it's in chronological order
-    results.reverse()
-    return results
-
-# --- User Helpers ---
-
-def register_user(username, password_hash):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute(
-            "INSERT INTO users (username, password_hash) VALUES (?, ?)",
-            (username, password_hash)
-        )
-        user_id = cursor.lastrowid
-        # Initialize default settings for user
-        cursor.execute(
-            "INSERT INTO settings (user_id) VALUES (?)",
-            (user_id,)
-        )
-        conn.commit()
-        upload_db_to_hf_async()
-        return user_id
-    except sqlite3.IntegrityError:
-        return None
-    finally:
-        conn.close()
-
-def get_user_by_username(username):
-    conn = get_db_connection()
-    user = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
-    conn.close()
-    return dict(user) if user else None
-
-def get_user_by_id(user_id):
-    conn = get_db_connection()
-    user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
-    conn.close()
-    return dict(user) if user else None
-
-def update_user_api_keys(user_id, gemini_api_key, binance_api_key, binance_api_secret, telegram_chat_id, telegram_bot_token):
-    conn = get_db_connection()
-    conn.execute(
-        """UPDATE users 
-           SET gemini_api_key = ?, binance_api_key = ?, binance_api_secret = ?, telegram_chat_id = ?, telegram_bot_token = ? 
-           WHERE id = ?""",
-         (gemini_api_key, binance_api_key, binance_api_secret, telegram_chat_id, telegram_bot_token, user_id)
+        '''UPDATE settings 
+           SET gemini_api_key = ?, binance_api_key = ?, binance_api_secret = ?, use_proxy = ?, proxy_url = ? 
+           WHERE id = 1''',
+         (gemini_api_key, binance_api_key, binance_api_secret, int(use_proxy), proxy_url)
     )
     conn.commit()
     conn.close()
     upload_db_to_hf_async()
 
-def update_user_demo_balance(user_id, balance):
+def update_demo_balance(balance):
     conn = get_db_connection()
-    conn.execute("UPDATE users SET demo_balance = ? WHERE id = ?", (balance, user_id))
+    conn.execute("UPDATE settings SET demo_balance = ? WHERE id = 1", (balance,))
     conn.commit()
     conn.close()
     upload_db_to_hf_async()
 
-# --- Settings Helpers ---
-
-def save_ui_settings(user_id, ui_language, ui_auto_center):
+def save_ui_settings(ui_language, ui_auto_center):
     conn = get_db_connection()
-    ui_auto_center = 1 if bool(ui_auto_center) else 0
-    # Update UI settings, if row doesn't exist, it won't do anything (row created on registration)
     conn.execute(
-        "UPDATE settings SET ui_language = ?, ui_auto_center = ? WHERE user_id = ?",
-        (ui_language, ui_auto_center, user_id)
+        "UPDATE settings SET ui_language = ?, ui_auto_center = ? WHERE id = 1",
+        (ui_language, ui_auto_center)
     )
     conn.commit()
     conn.close()
 
-def get_user_settings(user_id):
+def get_settings():
     conn = get_db_connection()
-    settings = conn.execute("SELECT * FROM settings WHERE user_id = ?", (user_id,)).fetchone()
+    settings = conn.execute("SELECT * FROM settings WHERE id = 1").fetchone()
     conn.close()
     return dict(settings) if settings else None
 
-def save_user_settings(user_id, trading_pair, timeframe, order_size_usdt, bot_enabled, trading_mode, market_type="SPOT", futures_leverage=10, min_probability_threshold=0.88, invert_signal=0, bot_started_at=None, use_limit_orders=1, use_trailing_stop=1, use_ai_limit_price=0, trailing_activation_pct=0.5, trailing_step_pct=0.2, use_ai_exit=0, use_ai_trailing=0):
+def save_settings(trading_pair, timeframe, order_size_usdt, bot_enabled, trading_mode, market_type="SPOT", futures_leverage=10, min_probability_threshold=0.88, invert_signal=0, bot_started_at=None, use_limit_orders=1, use_trailing_stop=1, use_ai_limit_price=0, trailing_activation_pct=0.5, trailing_step_pct=0.2, use_ai_exit=0, use_ai_trailing=0, daily_loss_limit=0.0, daily_profit_target=0.0):
     conn = get_db_connection()
-    futures_leverage = max(1, min(125, int(futures_leverage)))  # clamp 1-125
-    invert_signal = 1 if bool(invert_signal) else 0
-    use_limit_orders = 1 if bool(use_limit_orders) else 0
-    use_trailing_stop = 1 if bool(use_trailing_stop) else 0
-    use_ai_limit_price = 1 if bool(use_ai_limit_price) else 0
-    use_ai_exit = 1 if bool(use_ai_exit) else 0
-    use_ai_trailing = 1 if bool(use_ai_trailing) else 0
-    trailing_activation_pct = float(trailing_activation_pct)
-    trailing_step_pct = float(trailing_step_pct)
     conn.execute(
-        """INSERT INTO settings (user_id, trading_pair, timeframe, order_size_usdt, bot_enabled, trading_mode, market_type, futures_leverage, min_probability_threshold, invert_signal, bot_started_at, use_limit_orders, use_trailing_stop, use_ai_limit_price, trailing_activation_pct, trailing_step_pct, use_ai_exit, use_ai_trailing)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(user_id) DO UPDATE SET
-             trading_pair = excluded.trading_pair,
-             timeframe = excluded.timeframe,
-             order_size_usdt = excluded.order_size_usdt,
-             bot_enabled = excluded.bot_enabled,
-             trading_mode = excluded.trading_mode,
-             market_type = excluded.market_type,
-             futures_leverage = excluded.futures_leverage,
-             min_probability_threshold = excluded.min_probability_threshold,
-             invert_signal = excluded.invert_signal,
-             bot_started_at = excluded.bot_started_at,
-             use_limit_orders = excluded.use_limit_orders,
-             use_trailing_stop = excluded.use_trailing_stop,
-             use_ai_limit_price = excluded.use_ai_limit_price,
-             trailing_activation_pct = excluded.trailing_activation_pct,
-             trailing_step_pct = excluded.trailing_step_pct,
-             use_ai_exit = excluded.use_ai_exit,
-             use_ai_trailing = excluded.use_ai_trailing""",
-        (user_id, trading_pair.upper(), timeframe, order_size_usdt, int(bot_enabled), trading_mode, market_type, futures_leverage, float(min_probability_threshold), invert_signal, bot_started_at, use_limit_orders, use_trailing_stop, use_ai_limit_price, trailing_activation_pct, trailing_step_pct, use_ai_exit, use_ai_trailing)
+        '''UPDATE settings SET trading_pair = ?, timeframe = ?, order_size_usdt = ?, bot_enabled = ?, trading_mode = ?, market_type = ?, futures_leverage = ?, min_probability_threshold = ?, invert_signal = ?, bot_started_at = ?, use_limit_orders = ?, use_trailing_stop = ?, use_ai_limit_price = ?, trailing_activation_pct = ?, trailing_step_pct = ?, use_ai_exit = ?, use_ai_trailing = ?, daily_loss_limit = ?, daily_profit_target = ? WHERE id = 1''',
+        (trading_pair.upper(), timeframe, order_size_usdt, int(bot_enabled), trading_mode, market_type, futures_leverage, float(min_probability_threshold), invert_signal, bot_started_at, use_limit_orders, use_trailing_stop, use_ai_limit_price, trailing_activation_pct, trailing_step_pct, use_ai_exit, use_ai_trailing, float(daily_loss_limit), float(daily_profit_target))
     )
     conn.commit()
     conn.close()
     upload_db_to_hf_async()
 
 def get_all_active_bot_settings():
-    conn = get_db_connection()
-    # Join with users to get keys and chat IDs
-    rows = conn.execute(
-        """SELECT s.*, u.gemini_api_key, u.binance_api_key, u.binance_api_secret, u.telegram_chat_id, u.telegram_bot_token, u.demo_balance 
-           FROM settings s 
-           JOIN users u ON s.user_id = u.id 
-           WHERE s.bot_enabled = 1"""
-    ).fetchall()
-    conn.close()
-    return rows
+    s = get_settings()
+    if s and s.get("bot_enabled"):
+        return [(1, s)]
+    return []
 
-# --- Orders Helpers ---
-
-def create_order(user_id, pair, side, entry_price, stop_loss, take_profit, amount, size_usdt, trading_mode="DEMO", market_type="SPOT", leverage=1, status="ACTIVE", trailing_distance=None):
+def create_order(pair, side, entry_price, stop_loss, take_profit, amount, size_usdt, trading_mode="DEMO", market_type="SPOT", leverage=1, status="ACTIVE", trailing_distance=None, timeframe=None):
     conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        """INSERT INTO orders (user_id, pair, side, entry_price, stop_loss, take_profit, amount, size_usdt, status, trading_mode, market_type, leverage, trailing_distance) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (user_id, pair.upper(), side.upper(), float(entry_price), float(stop_loss) if stop_loss else None, float(take_profit) if take_profit else None, float(amount), float(size_usdt), status, trading_mode, market_type, leverage, float(trailing_distance) if trailing_distance else None)
+    conn.execute(
+        '''INSERT INTO orders (pair, side, entry_price, stop_loss, take_profit, amount, size_usdt, status, trading_mode, market_type, leverage, trailing_distance, timeframe) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+        (pair.upper(), side.upper(), float(entry_price), float(stop_loss) if stop_loss else None, float(take_profit) if take_profit else None, float(amount), float(size_usdt), status, trading_mode, market_type, leverage, float(trailing_distance) if trailing_distance else None, timeframe)
     )
-    order_id = cursor.lastrowid
     conn.commit()
     conn.close()
     upload_db_to_hf_async()
-    return order_id
 
-def get_active_orders(user_id=None):
+def get_active_orders():
     conn = get_db_connection()
-    if user_id:
-        rows = conn.execute("SELECT * FROM orders WHERE user_id = ? AND (status = 'ACTIVE' OR status = 'PENDING') ORDER BY created_at DESC", (user_id,)).fetchall()
-    else:
-        rows = conn.execute("SELECT * FROM orders WHERE status = 'ACTIVE' OR status = 'PENDING'").fetchall()
+    rows = conn.execute("SELECT * FROM orders WHERE (status = 'ACTIVE' OR status = 'PENDING') ORDER BY created_at DESC").fetchall()
     conn.close()
-    return rows
+    return [dict(row) for row in rows]
 
-def get_order_history(user_id):
+def get_order_history():
     conn = get_db_connection()
     rows = conn.execute(
-        "SELECT * FROM orders WHERE user_id = ? AND status NOT IN ('ACTIVE', 'PENDING') ORDER BY closed_at DESC", 
-        (user_id,)
+        "SELECT * FROM orders WHERE status NOT IN ('ACTIVE', 'PENDING') ORDER BY closed_at DESC"
     ).fetchall()
     conn.close()
-    return rows
+    return [dict(row) for row in rows]
 
-
-def get_bot_pnl_since(user_id, since_timestamp):
+def get_bot_pnl_since(since_timestamp):
     conn = get_db_connection()
-    settings_row = conn.execute("SELECT trading_mode FROM settings WHERE user_id = ?", (user_id,)).fetchone()
-    trading_mode = "DEMO"
-    if settings_row and settings_row["trading_mode"]:
-        trading_mode = settings_row["trading_mode"]
-        
+    settings_row = conn.execute("SELECT trading_mode FROM settings WHERE id = 1").fetchone()
+    if not settings_row:
+        conn.close()
+        return 0.0
+    trading_mode = settings_row["trading_mode"]
     row = conn.execute(
-        "SELECT SUM(pnl) AS total FROM orders WHERE user_id = ? AND trading_mode = ? AND status IN ('CLOSED_TP', 'CLOSED_SL', 'CLOSED_MANUAL')",
-        (user_id, trading_mode)
+        "SELECT SUM(pnl) AS total FROM orders WHERE trading_mode = ? AND status IN ('CLOSED_TP', 'CLOSED_SL', 'CLOSED_MANUAL')",
+        (trading_mode,)
     ).fetchone()
     conn.close()
-    return float(row["total"] or 0.0)
+    return row["total"] if row["total"] else 0.0
 
-
-def clear_demo_orders(user_id):
+def clear_demo_orders():
     conn = get_db_connection()
-    conn.execute(
-        "DELETE FROM orders WHERE user_id = ? AND trading_mode = 'DEMO'",
-        (user_id,)
-    )
+    conn.execute("DELETE FROM orders WHERE trading_mode = 'DEMO'")
+    conn.commit()
+    conn.close()
+    upload_db_to_hf_async()
+
+def delete_order(order_id):
+    conn = get_db_connection()
+    conn.execute("DELETE FROM orders WHERE id = ?", (order_id,))
     conn.commit()
     conn.close()
     upload_db_to_hf_async()
 
 def activate_pending_order(order_id):
     conn = get_db_connection()
+    conn.execute("UPDATE orders SET status = 'ACTIVE' WHERE id = ?", (order_id,))
+    conn.commit()
+    conn.close()
+    upload_db_to_hf_async()
+
+def save_market_candle(pair, timeframe, open_time, open_p, high, low, close, volume):
+    """Save a market candle for model retraining history."""
     try:
-        order = conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
-        if not order:
-            return False
-
-        # Only activate if currently PENDING
-        if (order["status"] or "").upper() != "PENDING":
-            return False
-
-        user_id = order["user_id"]
-        trading_mode = order["trading_mode"] or "DEMO"
-
-        # Списываем залог (коллатерал) при активации ордера — делаем проверку баланса
-        if trading_mode == "DEMO":
-            # Atomically deduct collateral only if sufficient balance remains,
-            # then mark order ACTIVE. Use conditional UPDATEs to avoid TOCTOU races.
-            cursor = conn.cursor()
-            # Try to deduct collateral only when demo_balance >= size_usdt
-            cursor.execute(
-                "UPDATE users SET demo_balance = demo_balance - ? WHERE id = ? AND demo_balance >= ?",
-                (order["size_usdt"], user_id, order["size_usdt"]) 
-            )
-            if cursor.rowcount == 0:
-                conn.rollback()
-                return False
-
-            # Now activate the order only if still pending
-            cursor.execute("UPDATE orders SET status = 'ACTIVE' WHERE id = ? AND status = 'PENDING'", (order_id,))
-            if cursor.rowcount == 0:
-                conn.rollback()
-                return False
-
-            conn.commit()
-            return True
-        else:
-            # LIVE: simply flip status to ACTIVE if it is still PENDING
-            cursor = conn.cursor()
-            cursor.execute("UPDATE orders SET status = 'ACTIVE' WHERE id = ? AND status = 'PENDING'", (order_id,))
-            if cursor.rowcount == 0:
-                conn.rollback()
-                return False
-            conn.commit()
-            return True
-    finally:
+        conn = get_db_connection()
+        conn.execute(
+            '''INSERT OR IGNORE INTO market_candles (pair, timeframe, open_time, open, high, low, close, volume)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+            (pair.upper(), timeframe, int(open_time), float(open_p), float(high), float(low), float(close), float(volume))
+        )
+        conn.commit()
         conn.close()
+    except Exception as e:
+        pass  # Non-critical, don't break the main cycle
 
-def close_order(order_id, status, close_price, pnl):
+def close_order(order_id, status=None, close_price=None, pnl=None):
     conn = get_db_connection()
-    # Get the order details to update user's balance
     order = conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
     if not order:
         conn.close()
         return False
-        
-    user_id = order["user_id"]
-    trading_mode = order["trading_mode"] if "trading_mode" in order.keys() else "DEMO"
     
-    # CRITICAL: Prevent double closing and double balance updates
-    if (order["status"] or "").upper() not in ["ACTIVE", "PENDING"]:
-        conn.close()
-        return False
+    # Default status if not provided
+    _status = status or "CLOSED_MANUAL"
+    _pnl = pnl if pnl is not None else 0.0
+    _close_price = close_price if close_price is not None else None
     
-    # Update order
+    import datetime as _dt
     conn.execute(
-        """UPDATE orders 
-           SET status = ?, pnl = ?, closed_at = CURRENT_TIMESTAMP 
-           WHERE id = ?""",
-        (status, pnl, order_id)
+        "UPDATE orders SET status = ?, pnl = ?, close_price = ?, closed_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (_status, _pnl, _close_price, order_id)
     )
     
-    # Update user's demo balance ONLY if it was a DEMO order
-    if trading_mode == "DEMO":
-        conn.execute(
-            "UPDATE users SET demo_balance = demo_balance + ? WHERE id = ?",
-            (pnl, user_id)
-        )
-    
+    # Only auto-update demo balance if pnl is explicitly provided (avoid double-counting)
+    if pnl is not None and order["trading_mode"] == "DEMO":
+        user_row = conn.execute("SELECT demo_balance FROM settings WHERE id = 1").fetchone()
+        if user_row:
+            new_balance = user_row["demo_balance"] + _pnl
+            conn.execute("UPDATE settings SET demo_balance = ? WHERE id = 1", (new_balance,))
+            
     conn.commit()
     conn.close()
     upload_db_to_hf_async()
@@ -524,161 +310,178 @@ def close_order(order_id, status, close_price, pnl):
 
 def update_order_sl(order_id, new_stop_loss):
     conn = get_db_connection()
-    conn.execute(
-        "UPDATE orders SET stop_loss = ? WHERE id = ?",
-        (float(new_stop_loss), order_id)
-    )
+    conn.execute("UPDATE orders SET stop_loss = ? WHERE id = ?", (new_stop_loss, order_id))
     conn.commit()
-    conn.close()
-    return True
-
-# --- Analysis Log Helpers ---
-
-def add_analysis_log(user_id, pair, indicators_summary, stage1, stage2, stage3):
-    conn = get_db_connection()
-    conn.execute(
-        """INSERT INTO analysis_logs (user_id, pair, indicators_summary, stage1_output, stage2_output, stage3_output)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (user_id, pair, indicators_summary, stage1, stage2, stage3)
-    )
-    conn.commit()
-    conn.close()
-
-def get_latest_analysis_log(user_id, pair):
-    conn = get_db_connection()
-    row = conn.execute(
-        "SELECT * FROM analysis_logs WHERE user_id = ? AND pair = ? ORDER BY created_at DESC LIMIT 1",
-        (user_id, pair)
-    ).fetchone()
-    conn.close()
-    return row
-
-def get_all_analysis_logs(user_id):
-    conn = get_db_connection()
-    rows = conn.execute(
-        "SELECT * FROM analysis_logs WHERE user_id = ? ORDER BY created_at DESC",
-        (user_id,)
-    ).fetchall()
-    conn.close()
-    return rows
-
-
-def should_persist_analysis_log(user_id, pair, stage3_output, min_interval_seconds=30):
-    """
-    Determines whether a new analysis log should be persisted.
-    - If there is no previous log -> True
-    - If the stage3_output differs from last -> True
-    - If identical and last log is older than min_interval_seconds -> True
-    - Otherwise -> False (skip writing duplicate logs)
-    """
-    from datetime import datetime
-    latest = get_latest_analysis_log(user_id, pair)
-    if not latest:
-        return True
-
-    # Compare stage3 text
-    last_stage3 = latest["stage3_output"] or ""
-    if last_stage3 != stage3_output:
-        return True
-
-    # If identical, check timestamp recency
-    try:
-        last_time = datetime.strptime(latest["created_at"], "%Y-%m-%d %H:%M:%S")
-        now = datetime.utcnow()
-        if (now - last_time).total_seconds() >= min_interval_seconds:
-            return True
-        return False
-    except Exception:
-        # If parsing fails conservatively persist
-        return True
-
-
-def add_analysis_log_if_needed(user_id, pair, indicators_summary, stage1, stage2, stage3, min_interval_seconds=30):
-    """
-    Adds an analysis log only when `should_persist_analysis_log` returns True.
-    Returns True if a new record was inserted, False if skipped.
-    """
-    if should_persist_analysis_log(user_id, pair, stage3, min_interval_seconds=min_interval_seconds):
-        add_analysis_log(user_id, pair, indicators_summary, stage1, stage2, stage3)
-        return True
-    return False
-
-def update_user_settings(user_id, key, value):
-    conn = get_db_connection()
-    allowed_keys = ["bot_enabled", "trading_pair", "trading_mode", "use_limit_orders", "invert_signal", "timeframe", "telegram_notifications"]
-    if key in allowed_keys:
-        conn.execute(f"UPDATE settings SET {key} = ? WHERE user_id = ?", (value, user_id))
-        conn.commit()
     conn.close()
     upload_db_to_hf_async()
 
-def get_filtered_orders(user_id, pair=None, trading_mode=None, side=None, status=None, start_date=None, end_date=None):
+def add_analysis_log(pair, indicators_summary, stage1, stage2, stage3):
     conn = get_db_connection()
-    query = "SELECT * FROM orders WHERE user_id = ?"
-    params = [user_id]
-    
-    if pair:
-        query += " AND UPPER(pair) = ?"
-        params.append(pair.upper())
-    if trading_mode:
-        query += " AND UPPER(trading_mode) = ?"
-        params.append(trading_mode.upper())
-    if side:
-        query += " AND UPPER(side) = ?"
-        params.append(side.upper())
-    if status:
-        query += " AND UPPER(status) = ?"
-        params.append(status.upper())
-    if start_date:
-        query += " AND created_at >= ?"
-        params.append(start_date + " 00:00:00")
-    if end_date:
-        query += " AND created_at <= ?"
-        params.append(end_date + " 23:59:59")
-        
-    query += " ORDER BY created_at DESC"
-    rows = conn.execute(query, params).fetchall()
+    conn.execute(
+        '''INSERT INTO analysis_logs (pair, indicators_summary, stage1_output, stage2_output, stage3_output)
+           VALUES (?, ?, ?, ?, ?)''',
+        (pair, indicators_summary, stage1, stage2, stage3)
+    )
+    conn.commit()
     conn.close()
-    return rows
 
-def get_filtered_analysis_logs(user_id, pair=None, start_date=None, end_date=None):
+def get_latest_analysis_log(pair):
     conn = get_db_connection()
-    query = "SELECT * FROM analysis_logs WHERE user_id = ?"
-    params = [user_id]
-    
-    if pair:
-        query += " AND UPPER(pair) = ?"
-        params.append(pair.upper())
-    if start_date:
-        query += " AND created_at >= ?"
-        params.append(start_date + " 00:00:00")
-    if end_date:
-        query += " AND created_at <= ?"
-        params.append(end_date + " 23:59:59")
-        
-    query += " ORDER BY created_at DESC"
-    rows = conn.execute(query, params).fetchall()
-    conn.close()
-    return rows
-
-def get_daily_pnl(user_id, trading_mode="DEMO"):
-    conn = get_db_connection()
-    row = conn.execute(
-        """SELECT SUM(pnl) AS total_pnl 
-           FROM orders 
-           WHERE user_id = ? 
-             AND trading_mode = ? 
-             AND status IN ('CLOSED_TP', 'CLOSED_SL', 'CLOSED_MANUAL')
-             AND closed_at >= datetime('now', '-1 day')""",
-        (user_id, trading_mode)
+    log = conn.execute(
+        "SELECT * FROM analysis_logs WHERE pair = ? ORDER BY created_at DESC LIMIT 1",
+        (pair,)
     ).fetchone()
-    
-    user_row = conn.execute("SELECT demo_balance FROM users WHERE id = ?", (user_id,)).fetchone()
     conn.close()
-    
-    pnl_val = float(row["total_pnl"] or 0.0) if row else 0.0
-    balance = float(user_row["demo_balance"] or 10000.0) if user_row else 10000.0
-    pct = (pnl_val / balance * 100) if balance > 0 else 0.0
-    
-    return {"pnl": pnl_val, "pct": pct}
+    return dict(log) if log else None
 
+def get_all_analysis_logs():
+    conn = get_db_connection()
+    logs = conn.execute(
+        "SELECT * FROM analysis_logs ORDER BY created_at DESC"
+    ).fetchall()
+    conn.close()
+    return [dict(log) for log in logs]
+
+
+
+def should_persist_analysis_log(pair, stage3_output, min_interval_seconds=30):
+    import json
+    from datetime import datetime
+    latest = get_latest_analysis_log(pair)
+    if not latest:
+        return True
+    
+    try:
+        latest_time = datetime.strptime(latest["created_at"], "%Y-%m-%d %H:%M:%S")
+        if (datetime.utcnow() - latest_time).total_seconds() < min_interval_seconds:
+            return False
+    except Exception:
+        pass
+        
+    try:
+        latest_s3 = json.loads(latest["stage3_output"])
+        new_s3 = json.loads(stage3_output)
+        action_changed = latest_s3.get("action") != new_s3.get("action")
+        
+        if not action_changed:
+            latest_time = datetime.strptime(latest["created_at"], "%Y-%m-%d %H:%M:%S")
+            time_diff = (datetime.utcnow() - latest_time).total_seconds()
+            if time_diff < 300:
+                return False
+    except Exception:
+        pass
+        
+    return True
+
+def add_analysis_log_if_needed(pair, indicators_summary, stage1, stage2, stage3, min_interval_seconds=30):
+    if should_persist_analysis_log(pair, stage3, min_interval_seconds=min_interval_seconds):
+        add_analysis_log(pair, indicators_summary, stage1, stage2, stage3)
+
+def update_settings(key, value):
+    conn = get_db_connection()
+    try:
+        conn.execute(f"UPDATE settings SET {key} = ? WHERE id = 1", (value,))
+        conn.commit()
+    except Exception as e:
+        print(f"Error updating setting {key}: {e}")
+    finally:
+        conn.close()
+
+def get_filtered_orders(pair=None, trading_mode=None, side=None, status=None, open_start=None, open_end=None, close_start=None, close_end=None, timeframe=None):
+    """
+    Все даты — локальные ('YYYY-MM-DD'). Конвертируем в UTC для сравнения с created_at/closed_at (UTC).
+    """
+    import datetime as _dt
+
+    def local_date_to_utc(date_str, end_of_day=False):
+        """Конвертирует локальную дату в UTC datetime строку."""
+        try:
+            local_tz = _dt.datetime.now(_dt.timezone.utc).astimezone().tzinfo
+            d = _dt.datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=local_tz)
+            if end_of_day:
+                d = d + _dt.timedelta(days=1)
+            return d.astimezone(_dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return date_str
+
+    query = "SELECT * FROM orders WHERE 1=1"
+    params = []
+    
+    if pair:
+        query += " AND pair = ?"
+        params.append(pair)
+    if timeframe:
+        query += " AND timeframe = ?"
+        params.append(timeframe)
+    if trading_mode:
+        query += " AND trading_mode = ?"
+        params.append(trading_mode)
+    if side:
+        query += " AND side = ?"
+        params.append(side)
+    if status:
+        query += " AND status = ?"
+        params.append(status)
+    if open_start:
+        query += " AND created_at >= ?"
+        params.append(local_date_to_utc(open_start, end_of_day=False))
+    if open_end:
+        query += " AND created_at < ?"
+        params.append(local_date_to_utc(open_end, end_of_day=True))
+    if close_start:
+        query += " AND closed_at >= ?"
+        params.append(local_date_to_utc(close_start, end_of_day=False))
+    if close_end:
+        query += " AND closed_at < ?"
+        params.append(local_date_to_utc(close_end, end_of_day=True))
+        
+    query += " ORDER BY created_at DESC"
+    
+    conn = get_db_connection()
+    rows = conn.execute(query, tuple(params)).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+def get_filtered_analysis_logs(pair=None, date=None):
+    """
+    date: локальная дата пользователя 'YYYY-MM-DD'.
+    Конвертируется в UTC-диапазон для корректной фильтрации (created_at хранится в UTC).
+    """
+    import datetime
+    query = "SELECT * FROM analysis_logs WHERE 1=1"
+    params = []
+    
+    if pair:
+        query += " AND pair = ?"
+        params.append(pair)
+    if date:
+        try:
+            local_tz = datetime.datetime.now(datetime.timezone.utc).astimezone().tzinfo
+            local_start = datetime.datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=local_tz)
+            local_end = local_start + datetime.timedelta(days=1)
+            utc_start = local_start.astimezone(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            utc_end = local_end.astimezone(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            query += " AND created_at >= ? AND created_at < ?"
+            params.extend([utc_start, utc_end])
+        except Exception:
+            query += " AND date(created_at) = date(?)"
+            params.append(date)
+        
+    query += " ORDER BY created_at DESC"
+    
+    conn = get_db_connection()
+    rows = conn.execute(query, tuple(params)).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+def get_daily_pnl(trading_mode="DEMO"):
+    conn = get_db_connection()
+    rows = conn.execute('''
+        SELECT date(created_at) as day, SUM(pnl) as total_pnl 
+        FROM orders 
+        WHERE trading_mode = ? 
+        GROUP BY day 
+        ORDER BY day ASC
+    ''', (trading_mode,)).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
