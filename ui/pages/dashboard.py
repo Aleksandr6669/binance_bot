@@ -504,16 +504,57 @@ def build_dashboard_view(page: ft.Page, lang: str):
             
                 series_list = [price_series]
             
-                # Горизонтальные линии для активных ордеров
+                # Горизонтальные линии и ТОЧКА АКТИВАЦИИ для активных ордеров
                 for o in active_orders:
                     entry = float(o["entry_price"])
-                    # Линия входа (голубая)
+                    side = str(o.get("side", "BUY")).upper()
+
+                    # Находим X-координату точки активации на графике (индекс свечи по времени активации)
+                    act_x_index = 0
+                    try:
+                        c_at = str(o.get("created_at", ""))
+                        if c_at:
+                            act_dt = datetime.strptime(c_at, "%Y-%m-%d %H:%M:%S")
+                            act_ts = act_dt.timestamp()
+                            for idx, k in enumerate(chart_klines):
+                                k_ts = k[0] / 1000
+                                if k_ts <= act_ts < k_ts + 60 or (idx == len(chart_klines) - 1 and act_ts >= k_ts):
+                                    act_x_index = idx
+                                    break
+                    except Exception:
+                        act_x_index = 0
+
+                    marker_color = "#10b981" if side == "BUY" else "#ef4444"
+
+                    # 1. Линия входа (от точки активации вправо)
                     series_list.append(
                         ftc.LineChartData(
-                            points=[ftc.LineChartDataPoint(0, entry), ftc.LineChartDataPoint(len(closes)-1, entry)],
+                            points=[ftc.LineChartDataPoint(act_x_index, entry), ftc.LineChartDataPoint(len(closes) + int(len(closes) * 0.33), entry)],
                             stroke_width=1.5,
                             color="#38bdf8",
                             dash_pattern=[5, 5]
+                        )
+                    )
+
+                    # 2. Вертикальная пунктирная линия активации (от осей до точки входа)
+                    series_list.append(
+                        ftc.LineChartData(
+                            points=[ftc.LineChartDataPoint(act_x_index, min_y_val), ftc.LineChartDataPoint(act_x_index, entry)],
+                            stroke_width=1.5,
+                            color=marker_color,
+                            dash_pattern=[2, 2]
+                        )
+                    )
+
+                    # 3. ТОЧКА АКТИВАЦИИ (Яркий маркер/кружок в точке [время активации, цена активации])
+                    series_list.append(
+                        ftc.LineChartData(
+                            points=[ftc.LineChartDataPoint(act_x_index, entry)],
+                            stroke_width=0,
+                            color=marker_color,
+                            show_markers=True,
+                            marker_size=12,
+                            marker_color=marker_color
                         )
                     )
                 
@@ -522,7 +563,7 @@ def build_dashboard_view(page: ft.Page, lang: str):
                         # Линия TP (зеленая)
                         series_list.append(
                             ftc.LineChartData(
-                                points=[ftc.LineChartDataPoint(0, tp), ftc.LineChartDataPoint(len(closes)-1, tp)],
+                                points=[ftc.LineChartDataPoint(act_x_index, tp), ftc.LineChartDataPoint(len(closes) + int(len(closes) * 0.33), tp)],
                                 stroke_width=1,
                                 color="#10b981",
                                 dash_pattern=[3, 3]
@@ -534,7 +575,7 @@ def build_dashboard_view(page: ft.Page, lang: str):
                         # Линия SL (красная)
                         series_list.append(
                             ftc.LineChartData(
-                                points=[ftc.LineChartDataPoint(0, sl), ftc.LineChartDataPoint(len(closes)-1, sl)],
+                                points=[ftc.LineChartDataPoint(act_x_index, sl), ftc.LineChartDataPoint(len(closes) + int(len(closes) * 0.33), sl)],
                                 stroke_width=1,
                                 color="#ef4444",
                                 dash_pattern=[3, 3]

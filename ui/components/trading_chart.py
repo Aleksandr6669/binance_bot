@@ -78,17 +78,53 @@ class TradingChart(ft.Container):
             
             series_list = [price_series]
             
-            # Горизонтальные линии для активных ордеров
+            # Горизонтальные линии и ТОЧКА АКТИВАЦИИ для активных ордеров
             max_x_val = len(closes) - 1
             for o_row in active_orders:
                 o = dict(o_row)
                 entry = float(o["entry_price"])
+                side = str(o.get("side", "BUY")).upper()
+
+                act_x_index = 0
+                try:
+                    c_at = str(o.get("created_at", ""))
+                    if c_at:
+                        act_dt = datetime.strptime(c_at, "%Y-%m-%d %H:%M:%S")
+                        act_ts = act_dt.timestamp()
+                        for idx, k in enumerate(sliced_klines):
+                            k_ts = k[0] / 1000
+                            if k_ts <= act_ts < k_ts + 60 or (idx == len(sliced_klines) - 1 and act_ts >= k_ts):
+                                act_x_index = idx
+                                break
+                except Exception:
+                    act_x_index = 0
+
+                marker_color = "#10b981" if side == "BUY" else "#ef4444"
+
                 series_list.append(
                     ftc.LineChartData(
-                        points=[ftc.LineChartDataPoint(0, entry), ftc.LineChartDataPoint(max_x_val, entry)],
+                        points=[ftc.LineChartDataPoint(act_x_index, entry), ftc.LineChartDataPoint(max_x_val, entry)],
                         stroke_width=1.5,
                         color="#38bdf8",
                         dash_pattern=[5, 5]
+                    )
+                )
+                series_list.append(
+                    ftc.LineChartData(
+                        points=[ftc.LineChartDataPoint(act_x_index, min_y_val), ftc.LineChartDataPoint(act_x_index, entry)],
+                        stroke_width=1.5,
+                        color=marker_color,
+                        dash_pattern=[2, 2]
+                    )
+                )
+                series_list.append(
+                    ftc.LineChartData(
+                        points=[ftc.LineChartDataPoint(act_x_index, entry)],
+                        stroke_width=0,
+                        color=marker_color,
+                        show_markers=True,
+                        marker_size=12,
+                        marker_color=marker_color
                     )
                 )
                 
@@ -96,7 +132,7 @@ class TradingChart(ft.Container):
                     tp = float(o["take_profit"])
                     series_list.append(
                         ftc.LineChartData(
-                            points=[ftc.LineChartDataPoint(0, tp), ftc.LineChartDataPoint(max_x_val, tp)],
+                            points=[ftc.LineChartDataPoint(act_x_index, tp), ftc.LineChartDataPoint(max_x_val, tp)],
                             stroke_width=1,
                             color="#10b981",
                             dash_pattern=[3, 3]
@@ -107,7 +143,7 @@ class TradingChart(ft.Container):
                     sl = float(o["stop_loss"])
                     series_list.append(
                         ftc.LineChartData(
-                            points=[ftc.LineChartDataPoint(0, sl), ftc.LineChartDataPoint(max_x_val, sl)],
+                            points=[ftc.LineChartDataPoint(act_x_index, sl), ftc.LineChartDataPoint(max_x_val, sl)],
                             stroke_width=1,
                             color="#ef4444",
                             dash_pattern=[3, 3]
