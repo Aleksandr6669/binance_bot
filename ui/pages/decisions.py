@@ -440,7 +440,7 @@ def build_decisions_view(page: ft.Page, lang: str):
     tf_dropdown = make_dropdown(
         label=None,
         options=[ft.dropdown.Option(k, v) for k, v in timeframe_options],
-        width=140,
+        width=125,
         value="",
         on_change=lambda e: on_tf_change(e)
     )
@@ -484,17 +484,17 @@ def build_decisions_view(page: ft.Page, lang: str):
 
     date_container = ft.Container(
         content=ft.Row(
-            [ft.Icon(ft.Icons.CALENDAR_MONTH_ROUNDED, size=12, color="#94a3b8"), date_text],
-            spacing=3,
+            [ft.Icon(ft.Icons.CALENDAR_MONTH_ROUNDED, size=13, color="#94a3b8"), date_text],
+            spacing=4,
             alignment=ft.MainAxisAlignment.CENTER
         ),
         border=ft.Border.all(1, ft.Colors.with_opacity(0.3, "#ffffff")),
         border_radius=8,
-        padding=ft.Padding(6, 0, 6, 0),
+        padding=ft.Padding(8, 0, 8, 0),
         on_click=open_date_picker,
         bgcolor=ft.Colors.TRANSPARENT,
         alignment=ft.alignment.Alignment(0, 0),
-        width=110,
+        width=130,
         height=48
     )
 
@@ -505,8 +505,8 @@ def build_decisions_view(page: ft.Page, lang: str):
             tf_dropdown,
             ft.Container(width=1, height=16, bgcolor="#334155"),
             date_container,
-        ], spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER),
-        padding=8
+        ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+        padding=10
     )
 
     # ---------- Left panel ----------
@@ -517,7 +517,7 @@ def build_decisions_view(page: ft.Page, lang: str):
             ft.Divider(color="#334155"),
             decisions_list
         ],
-        width=320,
+        width=480,
         expand=False,
         spacing=10
     )
