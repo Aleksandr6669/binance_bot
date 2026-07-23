@@ -1097,6 +1097,7 @@ def evaluate_market_signal(persist_log=False, place_order=False):
     order_size_usdt = resolve_order_size(settings["order_size_usdt"], trading_mode, market_type)
 
     active_order = None
+    pending_order = None
     has_existing_pair = False
     
     # Clean up duplicate active/pending orders in SQLite: keep only the latest one and cancel others
@@ -1131,15 +1132,17 @@ def evaluate_market_signal(persist_log=False, place_order=False):
                 active_order = pos
                 break
                 
-        # If no active position, check if there is a local pending order or Binance open order
-        if not has_existing_pair:
-            for o in local_orders:
-                if o["pair"].upper() == pair.upper() and o["status"] == "PENDING":
-                    has_existing_pair = True
-                    break
+        # Check if there is a local pending order or Binance open order
+        for o in local_orders:
+            if o["pair"].upper() == pair.upper() and o["status"] == "PENDING":
+                has_existing_pair = True
+                pending_order = o
+                break
+        if not pending_order:
             for o in live_open_orders:
                 if o["pair"].upper() == pair.upper():
                     has_existing_pair = True
+                    pending_order = o
                     break
     else:
         # DEMO Mode: check local DB active orders
@@ -1147,9 +1150,11 @@ def evaluate_market_signal(persist_log=False, place_order=False):
         for o in active_orders:
             if o["pair"].upper() == pair.upper():
                 has_existing_pair = True
-                if (o["status"] or "").upper() == "ACTIVE":
+                st_upper = (o["status"] or "").upper()
+                if st_upper == "ACTIVE":
                     active_order = o
-                    break
+                elif st_upper == "PENDING":
+                    pending_order = o
 
     try:
         klines = fetch_binance_klines(pair, timeframe, limit=100, market_type=market_type)
@@ -1309,14 +1314,29 @@ def evaluate_market_signal(persist_log=False, place_order=False):
             order_msg = "Анализ завершен. Вход заблокирован высокой волатильностью."
         elif has_existing_pair:
             use_ai_exit = bool(settings_dict.get("use_ai_exit", 0))
-            if use_ai_exit and active_order and action in ["BUY", "SELL"] and action != active_order["side"] and not vol_blocked and prob > threshold:
+            if use_ai_exit and active_order and action in ["BUY", "SELL"] and action != active_order["side"].upper() and not vol_blocked and prob > threshold:
                 entry_price = float(active_order["entry_price"])
                 amount = float(active_order["amount"])
                 current_side = active_order["side"].upper()
                 pnl = (current_close - entry_price) * amount if current_side == "BUY" else (entry_price - current_close) * amount
                 if trading_mode == "LIVE":
                     close_live_position(pair, amount, market_type, order_side=current_side)
+                    try:
+                        user = db.get_settings()
+                        if user and user.get("binance_api_key") and user.get("binance_api_secret"):
+                            endpoint = "/fapi/v1/allOpenOrders" if market_type.upper() == "FUTURES" else "/api/v3/openOrders"
+                            send_signed_binance_request(user["binance_api_key"], user["binance_api_secret"], "DELETE", endpoint, {"symbol": pair.upper()}, market_type)
+                    except Exception as ex:
+                        print(f"Error cancelling LIVE open orders on Binance: {ex}")
+
                 closed = db.close_order(active_order["id"], status="CLOSED_MANUAL", close_price=current_close, pnl=pnl)
+
+                # Cancel associated local pending order if present
+                if pending_order and pending_order.get("id"):
+                    try:
+                        db.close_order(pending_order["id"], status="CANCELED", close_price=float(pending_order.get("entry_price", 0.0)), pnl=0.0)
+                    except Exception as db_ex:
+                        print(f"Error cancelling local pending order alongside active position: {db_ex}")
 
                 # Check if closed in loss
                 if pnl < 0:
@@ -1326,7 +1346,6 @@ def evaluate_market_signal(persist_log=False, place_order=False):
                     except Exception as re:
                         print(f"Error retraining models after AI exit loss: {re}")
 
-                
                 pnl_sign = "+" if pnl >= 0 else ""
                 send_notification(
                     f"🔄 <b>[{trading_mode} Mode] Позиция закрыта (смена сигнала ИИ)</b>\n\n"
@@ -1337,8 +1356,51 @@ def evaluate_market_signal(persist_log=False, place_order=False):
                     f"Чистый PnL: <b>{pnl_sign}${pnl:,.2f}</b>"
                 )
                 order_msg = f"Текущая позиция {current_side} по {pair} закрыта из-за смены сигнала."
+            elif use_ai_exit and pending_order and action in ["BUY", "SELL"] and action != pending_order["side"].upper() and not vol_blocked and prob > threshold:
+                p_side = pending_order["side"].upper()
+                p_entry = float(pending_order.get("entry_price", 0.0))
+                p_id = pending_order.get("id")
+
+                if trading_mode == "LIVE":
+                    try:
+                        user = db.get_settings()
+                        if user and user.get("binance_api_key") and user.get("binance_api_secret"):
+                            endpoint = "/fapi/v1/allOpenOrders" if market_type.upper() == "FUTURES" else "/api/v3/openOrders"
+                            send_signed_binance_request(user["binance_api_key"], user["binance_api_secret"], "DELETE", endpoint, {"symbol": pair.upper()}, market_type)
+                    except Exception as ex:
+                        print(f"Error cancelling LIVE pending orders on Binance: {ex}")
+
+                local_cancelled = False
+                if p_id and (isinstance(p_id, int) or (isinstance(p_id, str) and p_id.isdigit())):
+                    try:
+                        db.close_order(int(p_id), status="CANCELED", close_price=p_entry, pnl=0.0)
+                        local_cancelled = True
+                    except Exception as db_ex:
+                        print(f"Error updating local pending order status to CANCELED: {db_ex}")
+
+                if not local_cancelled:
+                    try:
+                        for local_o in db.get_active_orders():
+                            if local_o["pair"].upper() == pair.upper() and (local_o.get("status") or "").upper() == "PENDING":
+                                db.close_order(local_o["id"], status="CANCELED", close_price=float(local_o.get("entry_price", 0.0)), pnl=0.0)
+                    except Exception as fallback_ex:
+                        print(f"Error in fallback local pending order cancellation: {fallback_ex}")
+
+                send_notification(
+                    f"🔄 <b>[{trading_mode} Mode] Отложенный ордер отменён (смена сигнала ИИ)</b>\n\n"
+                    f"Пара: <b>{pair}</b>\n"
+                    f"Тип ордера: {p_side}\n"
+                    f"Цена лимита: ${p_entry:,.4f}\n"
+                    f"Причина: Появился противоположный сигнал ИИ ({action})"
+                )
+                order_msg = f"Отложенный ордер {p_side} по {pair} отменён из-за смены сигнала ИИ на {action}."
             else:
-                order_msg = f"Позиция по {pair} уже открыта ({active_order['side'] if active_order else 'ожидает'}). Анализ продолжается."
+                if active_order:
+                    order_msg = f"Позиция по {pair} уже открыта ({active_order['side']}). Анализ продолжается."
+                elif pending_order:
+                    order_msg = f"Отложенный ордер по {pair} уже выставлен ({pending_order['side']}). Анализ продолжается."
+                else:
+                    order_msg = f"Позиция по {pair} уже открыта. Анализ продолжается."
         elif action in ["BUY", "SELL"] and place_order:
             order_type_desc = "лимитный" if use_limit_orders else "рыночный"
             if trading_mode == "LIVE":

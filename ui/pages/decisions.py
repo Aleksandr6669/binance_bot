@@ -8,21 +8,22 @@ from ui.i18n import t
 from ui.layout import build_layout
 from ui.helpers import make_textfield
 
-def to_local_time(ts_str, tz_offset_min=180):
+def to_local_time(ts_str, tz_offset_min=None):
     if not ts_str:
         return "—"
+    if tz_offset_min is None:
+        tz_offset_min = db.get_host_tz_offset_min()
     try:
-        utc_dt = datetime.datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=datetime.timezone.utc)
-        if tz_offset_min is not None:
-            user_tz = datetime.timezone(datetime.timedelta(minutes=tz_offset_min))
-            return utc_dt.astimezone(user_tz).strftime("%Y-%m-%d %H:%M:%S")
-        else:
-            return utc_dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        clean_ts = str(ts_str).split(".")[0].replace("T", " ")
+        utc_dt = datetime.datetime.strptime(clean_ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=datetime.timezone.utc)
+        user_tz = datetime.timezone(datetime.timedelta(minutes=tz_offset_min))
+        return utc_dt.astimezone(user_tz).strftime("%Y-%m-%d %H:%M:%S")
     except Exception:
-        return ts_str
+        return str(ts_str)
 
 def build_decisions_view(page: ft.Page, lang: str):
-    tz_offset = getattr(page, "tz_offset", 180)
+    tz_offset = getattr(page, "tz_offset", None) or db.get_host_tz_offset_min()
+    page.tz_offset = tz_offset
     user_tz = datetime.timezone(datetime.timedelta(minutes=tz_offset))
     today_str = datetime.datetime.now(datetime.timezone.utc).astimezone(user_tz).strftime("%Y-%m-%d")
 
@@ -571,6 +572,9 @@ def build_decisions_view(page: ft.Page, lang: str):
                         except:
                             pass
             except Exception as e:
+                err = str(e).lower()
+                if any(x in err for x in ["session closed", "destroyed session", "has been closed", "connection closed", "websocket", "broken pipe"]):
+                    break
                 print(f"Decisions background refresher error: {e}")
 
     page.run_task(decisions_refresher)

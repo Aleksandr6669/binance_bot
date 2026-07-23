@@ -340,6 +340,37 @@ def build_layout(page: ft.Page, content_control, active_index: int, lang: str):
         make_lang_badge("uk", "UA"),
     ], spacing=4)
 
+    # Dynamic clock displaying the host device's local time
+    clock_text = ft.Text("", size=11, color=TEXT_SECONDARY, weight=ft.FontWeight.W_500)
+    clock_container = ft.Container(
+        content=ft.Row([
+            ft.Icon(ft.Icons.ACCESS_TIME_ROUNDED, size=13, color=GOLD_COLOR),
+            clock_text
+        ], spacing=4, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+        padding=ft.Padding.symmetric(vertical=4, horizontal=8),
+        border_radius=6,
+        bgcolor=ft.Colors.with_opacity(0.06, "#ffffff"),
+        border=ft.Border.all(1, ft.Colors.with_opacity(0.08, "#ffffff"))
+    )
+
+    async def update_header_clock():
+        import asyncio, datetime
+        while True:
+            try:
+                now = datetime.datetime.now()
+                offset_sec = now.astimezone().utcoffset().total_seconds()
+                offset_h = int(offset_sec / 3600)
+                tz_str = f"UTC{offset_h:+d}"
+                clock_text.value = f"{now.strftime('%H:%M:%S')} ({tz_str})"
+                clock_container.update()
+            except Exception as e:
+                err = str(e).lower()
+                if any(x in err for x in ["session closed", "destroyed session", "has been closed", "connection closed", "websocket"]):
+                    break
+            await asyncio.sleep(1.0)
+
+    page.run_task(update_header_clock)
+
     t_nav_dash = {"en": "Trading Terminal", "ru": "Торговый терминал", "uk": "Торговий термінал"}.get(lang, "Trading Terminal")
     t_nav_hist = {"en": "Order History", "ru": "Все ордера", "uk": "Усі ордери"}.get(lang, "Order History")
     t_nav_dec = {"en": "AI Decisions", "ru": "AI Решения", "uk": "Рішення ШІ"}.get(lang, "AI Decisions")
@@ -353,8 +384,8 @@ def build_layout(page: ft.Page, content_control, active_index: int, lang: str):
     navbar = ft.Container(
         content=ft.Row([
             logo_btn,
-            ft.Row([nav_dash, nav_hist, nav_dec, nav_set, lang_row],
-                   spacing=20,
+            ft.Row([nav_dash, nav_hist, nav_dec, nav_set, clock_container, lang_row],
+                   spacing=16,
                    alignment=ft.MainAxisAlignment.END,
                    vertical_alignment=ft.CrossAxisAlignment.CENTER),
         ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN,

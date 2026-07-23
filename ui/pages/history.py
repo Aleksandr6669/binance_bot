@@ -8,22 +8,23 @@ from ui.layout import build_layout
 
 from ui.helpers import make_textfield, make_dropdown
 
-def utc_to_local(ts_str, tz_offset_min=180):
-    """Конвертирует UTC timestamp из БД в локальное время для отображения."""
+def utc_to_local(ts_str, tz_offset_min=None):
+    """Конвертирует UTC timestamp из БД в локальное время устройства для отображения."""
     if not ts_str:
         return "—"
+    if tz_offset_min is None:
+        tz_offset_min = db.get_host_tz_offset_min()
     try:
-        utc_dt = _dt_mod.datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=_dt_mod.timezone.utc)
-        if tz_offset_min is not None:
-            user_tz = _dt_mod.timezone(_dt_mod.timedelta(minutes=tz_offset_min))
-            return utc_dt.astimezone(user_tz).strftime("%Y-%m-%d %H:%M:%S")
-        else:
-            return utc_dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        clean_ts = str(ts_str).split(".")[0].replace("T", " ")
+        utc_dt = _dt_mod.datetime.strptime(clean_ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=_dt_mod.timezone.utc)
+        user_tz = _dt_mod.timezone(_dt_mod.timedelta(minutes=tz_offset_min))
+        return utc_dt.astimezone(user_tz).strftime("%Y-%m-%d %H:%M:%S")
     except Exception:
-        return ts_str
+        return str(ts_str)
 
 def build_history_view(page: ft.Page, lang: str):
-    tz_offset = getattr(page, "tz_offset", 180)
+    tz_offset = getattr(page, "tz_offset", None) or db.get_host_tz_offset_min()
+    page.tz_offset = tz_offset
     user_tz = _dt_mod.timezone(_dt_mod.timedelta(minutes=tz_offset))
     today_str = _dt_mod.datetime.now(_dt_mod.timezone.utc).astimezone(user_tz).strftime("%Y-%m-%d")
 
@@ -480,7 +481,8 @@ def build_history_view(page: ft.Page, lang: str):
                     open_start=filter_state["open_start"] if filter_state["open_start"] else None,
                     open_end=filter_state["open_end"] if filter_state["open_end"] else None,
                     close_start=filter_state["close_start"] if filter_state["close_start"] else None,
-                    close_end=filter_state["close_end"] if filter_state["close_end"] else None
+                    close_end=filter_state["close_end"] if filter_state["close_end"] else None,
+                    tz_offset_min=tz_offset
                 )
                 
                 if page.route != "/history":
@@ -650,6 +652,9 @@ def build_history_view(page: ft.Page, lang: str):
                         except:
                             pass
             except Exception as ex:
+                err = str(ex).lower()
+                if any(x in err for x in ["session closed", "destroyed session", "has been closed", "connection closed", "websocket", "broken pipe"]):
+                    break
                 print(f"History background refresher error: {ex}")
 
     page.run_task(history_refresher)

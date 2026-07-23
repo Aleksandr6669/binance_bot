@@ -397,17 +397,27 @@ def update_settings(key, value):
     finally:
         conn.close()
 
-def get_filtered_orders(pair=None, trading_mode=None, side=None, status=None, open_start=None, open_end=None, close_start=None, close_end=None, timeframe=None, tz_offset_min=180):
+def get_host_tz_offset_min():
+    """Возвращает смещение часового пояса устройства (где запущен бот) в минутах от UTC."""
+    try:
+        import datetime
+        return int(datetime.datetime.now().astimezone().utcoffset().total_seconds() / 60)
+    except Exception:
+        return 180
+
+def get_filtered_orders(pair=None, trading_mode=None, side=None, status=None, open_start=None, open_end=None, close_start=None, close_end=None, timeframe=None, tz_offset_min=None):
     """
-    Все даты — локальные ('YYYY-MM-DD'). Конвертируем в UTC для сравнения с created_at/closed_at (UTC) с учетом часового пояса пользователя.
+    Все даты — локальные ('YYYY-MM-DD'). Конвертируем в UTC для сравнения с created_at/closed_at (UTC) с учетом часового пояса устройства.
     """
     import datetime as _dt
 
+    if tz_offset_min is None:
+        tz_offset_min = get_host_tz_offset_min()
+
     def local_date_to_utc(date_str, end_of_day=False):
-        """Конвертирует локальную дату пользователя в UTC datetime строку."""
+        """Конвертирует локальную дату устройства в UTC datetime строку."""
         try:
-            offset = tz_offset_min if tz_offset_min is not None else 180
-            user_tz = _dt.timezone(_dt.timedelta(minutes=offset))
+            user_tz = _dt.timezone(_dt.timedelta(minutes=tz_offset_min))
             d = _dt.datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=user_tz)
             if end_of_day:
                 d = d + _dt.timedelta(days=1)
@@ -453,13 +463,16 @@ def get_filtered_orders(pair=None, trading_mode=None, side=None, status=None, op
     conn.close()
     return [dict(row) for row in rows]
 
-def get_filtered_analysis_logs(pair=None, date=None, tz_offset_min=180):
+def get_filtered_analysis_logs(pair=None, date=None, tz_offset_min=None):
     """
     date: локальная дата пользователя 'YYYY-MM-DD'.
-    tz_offset_min: смещение часового пояса клиента в минутах от UTC (например 180 для UTC+3 MSK).
+    tz_offset_min: смещение часового пояса в минутах от UTC.
     Конвертирует локальную дату пользователя в точный UTC-диапазон для базы данных.
     """
     import datetime
+    if tz_offset_min is None:
+        tz_offset_min = get_host_tz_offset_min()
+
     query = "SELECT * FROM analysis_logs WHERE 1=1"
     params = []
     
@@ -468,11 +481,7 @@ def get_filtered_analysis_logs(pair=None, date=None, tz_offset_min=180):
         params.append(pair)
     if date:
         try:
-            if tz_offset_min is not None:
-                user_tz = datetime.timezone(datetime.timedelta(minutes=tz_offset_min))
-            else:
-                user_tz = datetime.datetime.now(datetime.timezone.utc).astimezone().tzinfo or datetime.timezone.utc
-            
+            user_tz = datetime.timezone(datetime.timedelta(minutes=tz_offset_min))
             local_start = datetime.datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=user_tz)
             local_end = local_start + datetime.timedelta(days=1)
             utc_start = local_start.astimezone(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
@@ -490,16 +499,16 @@ def get_filtered_analysis_logs(pair=None, date=None, tz_offset_min=180):
     conn.close()
     return [dict(row) for row in rows]
 
-def get_today_pnl(trading_mode="DEMO", tz_offset_min=180):
+def get_today_pnl(trading_mode="DEMO", tz_offset_min=None):
     """
-    Рассчитывает суммарный PnL закрытых ордеров за ТЕКУЩИЙ ЛОКАЛЬНЫЙ ДЕНЬ пользователя
-    (от 00:00:00 до 23:59:59 по местному времени).
-    При наступлении новых суток по местному времени показатель автоматически обнуляется ($0.00).
+    Рассчитывает суммарный PnL закрытых ордеров за ТЕКУЩИЙ ЛОКАЛЬНЫЙ ДЕНЬ устройства
+    (от 00:00:00 до 23:59:59 по местному времени устройства).
     """
     import datetime as _dt
-    
-    offset_minutes = tz_offset_min if tz_offset_min is not None else 180
-    user_tz = _dt.timezone(_dt.timedelta(minutes=offset_minutes))
+    if tz_offset_min is None:
+        tz_offset_min = get_host_tz_offset_min()
+
+    user_tz = _dt.timezone(_dt.timedelta(minutes=tz_offset_min))
     
     now_user = _dt.datetime.now(_dt.timezone.utc).astimezone(user_tz)
     local_today_start = _dt.datetime(now_user.year, now_user.month, now_user.day, 0, 0, 0, tzinfo=user_tz)

@@ -10,6 +10,14 @@ from ui.theme import *
 from ui.i18n import t, get_lang
 from ui.layout import build_layout
 
+def is_destroyed_session_error(e):
+    err = str(e).lower()
+    return any(x in err for x in [
+        "session closed", "destroyed session",
+        "has been closed", "connection closed",
+        "websocket", "broken pipe"
+    ])
+
 def build_dashboard_view(page: ft.Page, lang: str):
     # Хранение текущих данных для графиков и инференса
     current_pair_data = {"klines": [], "price": 0.0}
@@ -99,6 +107,8 @@ def build_dashboard_view(page: ft.Page, lang: str):
             current_price = await asyncio.to_thread(trading_engine.fetch_current_price, pair, market_type)
             indicator_price.value = f"Price: {current_price:,.2f}"
         except Exception as e:
+            if is_destroyed_session_error(e):
+                raise e
             print(f"Error loading price/orders on dashboard: {e}")
 
         # Рассчитаем нереализованный PNL только для исполненных АКТИВНЫХ ордеров (status == "ACTIVE")
@@ -120,6 +130,8 @@ def build_dashboard_view(page: ft.Page, lang: str):
             tz_offset = getattr(page, "tz_offset", 180)
             realized_pnl = await asyncio.to_thread(db.get_today_pnl, trading_mode=trading_mode, tz_offset_min=tz_offset)
         except Exception as e:
+            if is_destroyed_session_error(e):
+                raise e
             print(f"Error fetching today PNL: {e}")
 
         # 2. Обновление балансов и Equity (Баланс + плавающий PnL только по ACTIVE позициям)
@@ -140,6 +152,8 @@ def build_dashboard_view(page: ft.Page, lang: str):
                 collateral_val = sum(float(o["size_usdt"]) for o in active_positions)
                 collateral_text.value = f"{t('wallet_collateral', get_lang(page))}: ${collateral_val:,.2f} USDT"
         except Exception as e:
+            if is_destroyed_session_error(e):
+                raise e
             print(f"Error fetching balances: {e}")
 
         # Суммируем реализованный PNL и нереализованный PNL текущих позиций
@@ -338,6 +352,8 @@ def build_dashboard_view(page: ft.Page, lang: str):
                     order_info["control"].scale = 1.0
                 page.update()
         except Exception as e:
+            if is_destroyed_session_error(e):
+                raise e
             print(f"Error updating active orders layout: {e}")
 
         # 4. История ордеров
@@ -362,20 +378,23 @@ def build_dashboard_view(page: ft.Page, lang: str):
                         )
                     )
         except Exception as e:
+            if is_destroyed_session_error(e):
+                raise e
             print(f"Error fetching order history: {e}")
 
         # 5. История логов нейросети
-        tz_offset = getattr(page, "tz_offset", 180)
+        tz_offset = getattr(page, "tz_offset", None) or db.get_host_tz_offset_min()
         user_tz = timezone(timedelta(minutes=tz_offset))
 
         def to_client_local_str(ts_str):
             if not ts_str:
                 return "—"
             try:
-                utc_dt = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                clean_ts = str(ts_str).split(".")[0].replace("T", " ")
+                utc_dt = datetime.strptime(clean_ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
                 return utc_dt.astimezone(user_tz).strftime("%Y-%m-%d %H:%M:%S")
             except Exception:
-                return ts_str
+                return str(ts_str)
 
         try:
             analysis_logs = await asyncio.to_thread(db.get_all_analysis_logs)
@@ -414,6 +433,8 @@ def build_dashboard_view(page: ft.Page, lang: str):
                         )
                     )
         except Exception as e:
+            if is_destroyed_session_error(e):
+                raise e
             print(f"Error fetching logs history: {e}")
 
             
@@ -478,6 +499,8 @@ def build_dashboard_view(page: ft.Page, lang: str):
                 ml_logs_stage3.value = ""
                 ml_log_time.value = "Last run: —"
         except Exception as e:
+            if is_destroyed_session_error(e):
+                raise e
             print(f"Error reading latest AI log: {e}")
 
         
@@ -704,6 +727,8 @@ def build_dashboard_view(page: ft.Page, lang: str):
             else:
                 chart_container.content = ft.Text("Ошибка получения свечей с Binance", color="#ef4444", size=14)
         except Exception as e:
+            if is_destroyed_session_error(e):
+                raise e
             chart_container.content = ft.Text(f"Ошибка загрузки графика: {str(e)}", color="#ef4444", size=12)
 
         try:
@@ -734,12 +759,7 @@ def build_dashboard_view(page: ft.Page, lang: str):
             try:
                 await fetch_dashboard_data()
             except Exception as e:
-                err = str(e)
-                if any(x in err.lower() for x in [
-                    "session closed", "destroyed session",
-                    "has been closed", "connection closed",
-                    "websocket", "broken pipe"
-                ]):
+                if is_destroyed_session_error(e):
                     break  # Сессия завершена — выходим
                 else:
                     print(f"Dashboard refresh error: {e}")

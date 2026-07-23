@@ -52,17 +52,8 @@ def main(page: ft.Page):
     page.theme_mode = ft.ThemeMode.DARK
     page.bgcolor = BG_COLOR
 
-    # Автоматически настраиваем таймзону конкретного сеанса
-    try:
-        import datetime as _dt_env
-        offset_sec = _dt_env.datetime.now().astimezone().utcoffset().total_seconds()
-        page.tz_offset = int(offset_sec / 60)
-    except Exception:
-        page.tz_offset = 180
-
-    client_ip = getattr(page, "client_ip", None)
-    if client_ip:
-        page.tz_offset = get_client_tz_offset(client_ip)
+    # Настраиваем таймзону на основе устройства, где запущен бот
+    page.tz_offset = db.get_host_tz_offset_min()
 
     try:
         if hasattr(page, "window"):
