@@ -905,6 +905,18 @@ def fetch_binance_klines_with_start(symbol, timeframe, start_time, limit=100, ma
         logger.warning(f"Error fetching klines with start_time={start_time}: {e}")
         return []
 
+def adapt_models_to_closed_orders(pair=None, timeframe=None):
+    """
+    Алиас для тонкого дообучения (RL) нейросети на реальных закрытых ордерах и истории логов.
+    """
+    import db
+    settings = db.get_settings()
+    if not pair:
+        pair = (dict(settings).get("trading_pair", "SOLUSDC") if settings else "SOLUSDC").upper()
+    if not timeframe:
+        timeframe = dict(settings).get("timeframe", "1m") if settings else "1m"
+    return retrain_on_market_history(pair, timeframe)
+
 def retrain_on_market_history(pair, timeframe):
     """
     Дообучает DLinear и Классификатор на реальных накопленных свечах из SQLite.

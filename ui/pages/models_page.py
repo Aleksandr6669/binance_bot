@@ -106,10 +106,10 @@ def build_models_view(page: ft.Page, lang: str):
             # Button callbacks bound to pair and tf
             def make_retrain_handler(p=pair, t_frame=tf):
                 async def retrain_action(e):
-                    set_busy(True, f"Обучение с нуля {p} ({t_frame}): симуляция псевдоторговли, проверка TP/SL, расчёт уровней лимиток и ИИ-трейлинга..." if lang == "ru" else f"Retraining {p} ({t_frame}) with virtual TP/SL bootstrapping...")
+                    set_busy(True, f"Обучение с нуля {p} ({t_frame}): псевдоторговля, проверка TP/SL, отступы лимиток и ИИ-трейлинг..." if lang == "ru" else f"Retraining {p} ({t_frame}) from scratch...")
                     try:
-                        res = await asyncio.to_thread(scalping_ensemble.retrain_on_market_history, p, t_frame)
-                        show_toast(f"Модель {p} ({t_frame}) успешно переобучена!" if lang == "ru" else f"Model {p} ({t_frame}) retrained successfully!")
+                        res = await asyncio.to_thread(scalping_ensemble.bootstrap_virtual_training, p, t_frame)
+                        show_toast(f"Модель {p} ({t_frame}) успешно переобучена с нуля!" if lang == "ru" else f"Model {p} ({t_frame}) retrained successfully!")
                     except Exception as ex:
                         show_toast(f"Ошибка переобучения: {ex}", color=RED_COLOR)
                     finally:
@@ -119,9 +119,9 @@ def build_models_view(page: ft.Page, lang: str):
 
             def make_finetune_handler(p=pair, t_frame=tf):
                 async def finetune_action(e):
-                    set_busy(True, f"Дообучение (RL) модели {p} ({t_frame}) на истории ордеров и логах..." if lang == "ru" else f"Fine-tuning {p} ({t_frame}) model...")
+                    set_busy(True, f"Дообучение (RL) модели {p} ({t_frame}) на закрытых ордерах и логах..." if lang == "ru" else f"Fine-tuning {p} ({t_frame}) model...")
                     try:
-                        await asyncio.to_thread(scalping_ensemble.adapt_models_to_closed_orders)
+                        res = await asyncio.to_thread(scalping_ensemble.adapt_models_to_closed_orders, p, t_frame)
                         show_toast(f"Модель {p} ({t_frame}) дообучена на обратной связи!" if lang == "ru" else f"Model {p} ({t_frame}) fine-tuned successfully!")
                     except Exception as ex:
                         show_toast(f"Ошибка дообучения: {ex}", color=RED_COLOR)
