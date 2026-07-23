@@ -233,7 +233,7 @@ def build_models_view(page: ft.Page, lang: str):
                 bgcolor=COLOR_GLASS_BG,
                 padding=18,
                 border_radius=12,
-                border=ft.Border.all(1, GOLD_BORDER if is_active else BORDER_COLOR),
+                border=ft.Border.all(1, GOLD_COLOR if is_active else BORDER_COLOR),
                 col={"xs": 12}
             )
             models_grid.controls.append(card)
