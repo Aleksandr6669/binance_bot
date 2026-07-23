@@ -407,19 +407,7 @@ def build_models_view(page: ft.Page, lang: str):
         ft.Column([
             ft.Text(t_title, size=22, weight=ft.FontWeight.BOLD, color="#f8fafc"),
             ft.Text(t_desc, size=11, color="#94a3b8")
-        ], expand=True),
-        ft.Row([
-            ft.OutlinedButton(
-                content=ft.Row([ft.Icon(ft.Icons.REFRESH, size=16, color=GOLD_COLOR), ft.Text(t_btn_refresh, size=12, color=GOLD_COLOR)], spacing=4),
-                style=ft.ButtonStyle(side=ft.BorderSide(1, GOLD_COLOR), shape=ft.RoundedRectangleBorder(radius=8)),
-                on_click=lambda e: refresh_models_list()
-            ),
-            ft.ElevatedButton(
-                content=ft.Row([ft.Icon(ft.Icons.ADD_ROUNDED, size=16, color="#030407"), ft.Text(t_btn_create, size=12, color="#030407", weight=ft.FontWeight.BOLD)], spacing=4),
-                style=ft.ButtonStyle(bgcolor=GOLD_COLOR, shape=ft.RoundedRectangleBorder(radius=8)),
-                on_click=open_create_dialog
-            )
-        ], spacing=10)
+        ], expand=True)
     ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER)
 
     # Fixed active info banner (Non-scrollable)
