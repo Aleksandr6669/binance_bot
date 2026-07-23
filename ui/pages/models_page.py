@@ -218,7 +218,7 @@ def build_models_view(page: ft.Page, lang: str):
                         ),
                         ft.OutlinedButton(
                             content=ft.Row([ft.Icon(ft.Icons.FLASH_ON_ROUNDED, size=14, color="#a78bfa"), ft.Text(t_finetune, size=12, color="#a78bfa", weight=ft.FontWeight.BOLD)], spacing=4),
-                            style=ft.ButtonStyle(border_side=ft.BorderSide(1, "#a78bfa"), shape=ft.RoundedRectangleBorder(radius=6), padding=ft.Padding.symmetric(vertical=8, horizontal=12)),
+                            style=ft.ButtonStyle(side=ft.BorderSide(1, "#a78bfa"), shape=ft.RoundedRectangleBorder(radius=6), padding=ft.Padding.symmetric(vertical=8, horizontal=12)),
                             on_click=make_finetune_handler(pair, tf)
                         ),
                         ft.IconButton(
@@ -322,7 +322,7 @@ def build_models_view(page: ft.Page, lang: str):
         ft.Row([
             ft.OutlinedButton(
                 content=ft.Row([ft.Icon(ft.Icons.REFRESH, size=16, color=GOLD_COLOR), ft.Text(t_btn_refresh, size=12, color=GOLD_COLOR)], spacing=4),
-                style=ft.ButtonStyle(border_side=ft.BorderSide(1, GOLD_COLOR), shape=ft.RoundedRectangleBorder(radius=6)),
+                style=ft.ButtonStyle(side=ft.BorderSide(1, GOLD_COLOR), shape=ft.RoundedRectangleBorder(radius=6)),
                 on_click=lambda e: refresh_models_list()
             ),
             ft.ElevatedButton(
