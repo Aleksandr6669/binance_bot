@@ -301,6 +301,7 @@ classifier_model = None
 ai_trailing_model = NumPyTrailingModel(num_features=9)
 current_model_pair = None
 current_model_timeframe = None
+last_virtual_stats = {}
 
 training_status = {
     "active": False,
@@ -351,12 +352,40 @@ def save_models_to_disk(pair, timeframe):
         except Exception as db_ex:
             logger.warning(f"Не удалось загрузить историю из БД для экспорта: {db_ex}")
 
+        # Get virtual stats from memory or existing file
+        v_stat = last_virtual_stats.get((pair.upper(), timeframe))
+        if not v_stat and os.path.exists(filepath):
+            try:
+                with open(filepath, "rb") as f_prev:
+                    d_prev = pickle.load(f_prev)
+                    v_stat = d_prev.get("virtual_stats")
+            except Exception:
+                pass
+        if not v_stat:
+            v_stat = {"total": 0, "wins": 0, "losses": 0, "winrate": 0.0}
+
+        # Calculate real/demo trades stats from orders database for this pair
+        real_closed = [o for o in orders if o.get("status") not in ["ACTIVE", "PENDING"]]
+        r_wins = sum(1 for o in real_closed if float(o.get("pnl", 0.0) or 0.0) > 0)
+        r_losses = sum(1 for o in real_closed if float(o.get("pnl", 0.0) or 0.0) < 0)
+        r_total = len(real_closed)
+        r_winrate = round((r_wins / r_total * 100), 1) if r_total > 0 else 0.0
+        
+        real_stats = {
+            "total": r_total,
+            "wins": r_wins,
+            "losses": r_losses,
+            "winrate": r_winrate
+        }
+
         last_loss = float(getattr(dlinear_model, "last_loss", 0.000016)) if dlinear_model is not None else 0.000016
         data = {
             "dlinear": dlinear_model,
             "classifier": classifier_model,
             "trailing": ai_trailing_model,
             "loss": last_loss,
+            "virtual_stats": v_stat,
+            "real_stats": real_stats,
             "db_orders": orders,
             "db_analysis_logs": analysis_logs,
             "db_market_candles": market_candles
@@ -385,6 +414,8 @@ def save_models_to_disk(pair, timeframe):
                 "candles_count": len(market_candles),
                 "feedback_count": len(analysis_logs),
                 "loss": last_loss,
+                "virtual_stats": v_stat,
+                "real_stats": real_stats,
                 "mtime": mtime,
                 "size_mb": size_mb
             }
@@ -547,6 +578,9 @@ def get_models_metadata_list():
                 elif dl is not None and hasattr(dl, "last_loss"):
                     loss_val = float(dl.last_loss)
                     
+                v_stat = data.get("virtual_stats", {"total": 0, "wins": 0, "losses": 0, "winrate": 0.0})
+                r_stat = data.get("real_stats", {"total": 0, "wins": 0, "losses": 0, "winrate": 0.0})
+
                 # Создаем meta.json для последующих мгновенных загрузок
                 try:
                     meta_to_write = {
@@ -556,6 +590,8 @@ def get_models_metadata_list():
                         "candles_count": candles_count,
                         "feedback_count": feedback_count,
                         "loss": loss_val,
+                        "virtual_stats": v_stat,
+                        "real_stats": r_stat,
                         "mtime": mtime,
                         "size_mb": size_mb
                     }
@@ -564,7 +600,8 @@ def get_models_metadata_list():
                 except Exception:
                     pass
         except Exception:
-            pass
+            v_stat = {"total": 0, "wins": 0, "losses": 0, "winrate": 0.0}
+            r_stat = {"total": 0, "wins": 0, "losses": 0, "winrate": 0.0}
             
         result.append({
             "filename": filename,
@@ -574,6 +611,8 @@ def get_models_metadata_list():
             "candles_count": candles_count,
             "feedback_count": feedback_count,
             "loss": loss_val,
+            "virtual_stats": v_stat,
+            "real_stats": r_stat,
             "mtime": mtime,
             "size_mb": size_mb,
             "filepath": filepath
@@ -1632,7 +1671,17 @@ def _bootstrap_virtual_training_inner(pair, timeframe):
         X_lgb = pd.concat([X_lgb, extra_X_df], ignore_index=True)
         y_lgb = pd.concat([y_lgb, extra_y_series], ignore_index=True)
         
-    logger.info(f"Бутстрап: Найдено и симулировано {len(virtual_orders)} виртуальных сделок для обучения классификатора.")
+    v_wins = sum(1 for vo in virtual_orders if vo.get("is_win") == 1)
+    v_losses = len(virtual_orders) - v_wins
+    v_total = len(virtual_orders)
+    v_winrate = round((v_wins / v_total * 100), 1) if v_total > 0 else 0.0
+    last_virtual_stats[(pair.upper(), timeframe)] = {
+        "total": v_total,
+        "wins": v_wins,
+        "losses": v_losses,
+        "winrate": v_winrate
+    }
+    logger.info(f"Бутстрап: Найдено и симулировано {v_total} виртуальных сделок (Побед: {v_wins}, Потерь: {v_losses}, WinRate: {v_winrate}%).")
     
     if HAS_LIGHTGBM:
         import lightgbm as lgb

@@ -95,6 +95,19 @@ def build_models_view(page: ft.Page, lang: str):
             loss_val = m["loss"]
             loss_str = f"{loss_val:.6f}" if loss_val is not None else "0.000016"
             
+            v_st = m.get("virtual_stats") or {}
+            r_st = m.get("real_stats") or {}
+
+            v_tot = v_st.get("total", 0)
+            v_w = v_st.get("wins", 0)
+            v_l = v_st.get("losses", 0)
+            v_wr = v_st.get("winrate", 0.0)
+
+            r_tot = r_st.get("total", 0)
+            r_w = r_st.get("wins", 0)
+            r_l = r_st.get("losses", 0)
+            r_wr = r_st.get("winrate", 0.0)
+
             is_lgbm = "LightGBM" in m["classifier_type"]
             clf_badge_color = "#10b981" if is_lgbm else "#f59e0b"
             clf_label_text = "🟢 LightGBM (Gradient Boosting)" if is_lgbm else "⚡ NumPy Classifier (Fallback)"
@@ -265,6 +278,49 @@ def build_models_view(page: ft.Page, lang: str):
                                 ft.Text(f"({m['size_mb']} MB)", size=11, color="#64748b")
                             ], spacing=4)
                         ], spacing=2, col={"xs": 6, "md": 3}),
+                    ], spacing=10),
+
+                    ft.Divider(color=ft.Colors.with_opacity(0.06, "#ffffff"), height=14),
+
+                    # Trades Stats Row (Virtual vs Real/Demo)
+                    ft.ResponsiveRow([
+                        # Column 1: Virtual Trades (Bootstrap simulation)
+                        ft.Column([
+                            ft.Row([
+                                ft.Icon(ft.Icons.AUTO_GRAPH_ROUNDED, size=12, color=GOLD_COLOR),
+                                ft.Text("ВИРТУАЛЬНЫЕ СДЕЛКИ (BOOTSTRAP)", size=9, color="#94a3b8", weight=ft.FontWeight.BOLD)
+                            ], spacing=4),
+                            ft.Row([
+                                ft.Text(f"{v_tot} всего", size=12, weight=ft.FontWeight.BOLD, color="#f8fafc"),
+                                ft.Text(f"({v_w} 🟢 | {v_l} 🔴)", size=11, color="#cbd5e1"),
+                                ft.Container(
+                                    content=ft.Text(f"WR {v_wr:.1f}%", size=9, weight=ft.FontWeight.BOLD, color=GOLD_COLOR),
+                                    padding=ft.Padding.symmetric(vertical=1, horizontal=5),
+                                    border_radius=4,
+                                    bgcolor=ft.Colors.with_opacity(0.12, GOLD_COLOR),
+                                    border=ft.Border.all(1, ft.Colors.with_opacity(0.3, GOLD_COLOR))
+                                )
+                            ], spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+                        ], spacing=2, col={"xs": 12, "md": 6}),
+
+                        # Column 2: Real / Demo Trading Orders
+                        ft.Column([
+                            ft.Row([
+                                ft.Icon(ft.Icons.RECEIPT_LONG_ROUNDED, size=12, color="#38bdf8"),
+                                ft.Text("РЕАЛЬНЫЕ / ДЕМО СДЕЛКИ", size=9, color="#94a3b8", weight=ft.FontWeight.BOLD)
+                            ], spacing=4),
+                            ft.Row([
+                                ft.Text(f"{r_tot} всего", size=12, weight=ft.FontWeight.BOLD, color="#f8fafc"),
+                                ft.Text(f"({r_w} 🟢 | {r_l} 🔴)", size=11, color="#cbd5e1"),
+                                ft.Container(
+                                    content=ft.Text(f"WR {r_wr:.1f}%", size=9, weight=ft.FontWeight.BOLD, color="#38bdf8"),
+                                    padding=ft.Padding.symmetric(vertical=1, horizontal=5),
+                                    border_radius=4,
+                                    bgcolor=ft.Colors.with_opacity(0.12, "#38bdf8"),
+                                    border=ft.Border.all(1, ft.Colors.with_opacity(0.3, "#38bdf8"))
+                                )
+                            ], spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+                        ], spacing=2, col={"xs": 12, "md": 6})
                     ], spacing=10),
 
                     ft.Divider(color=ft.Colors.with_opacity(0.06, "#ffffff"), height=14),
