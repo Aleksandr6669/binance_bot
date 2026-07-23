@@ -346,7 +346,7 @@ def save_models_to_disk(pair, timeframe):
                 conn.row_factory = sqlite3.Row
                 orders = [dict(row) for row in conn.execute("SELECT * FROM orders WHERE pair = ?", (pair.upper(),)).fetchall()]
                 analysis_logs = [dict(row) for row in conn.execute("SELECT * FROM analysis_logs WHERE pair = ?", (pair.upper(),)).fetchall()]
-                market_candles = [dict(row) for row in conn.execute("SELECT * FROM market_candles WHERE pair = ?", (pair.upper(),)).fetchall()]
+                market_candles = [dict(row) for row in conn.execute("SELECT * FROM market_candles WHERE pair = ? AND timeframe = ?", (pair.upper(), timeframe)).fetchall()]
                 conn.close()
         except Exception as db_ex:
             logger.warning(f"Не удалось загрузить историю из БД для экспорта: {db_ex}")
