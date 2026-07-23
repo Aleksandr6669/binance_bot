@@ -440,7 +440,7 @@ def build_decisions_view(page: ft.Page, lang: str):
     tf_dropdown = make_dropdown(
         label=None,
         options=[ft.dropdown.Option(k, v) for k, v in timeframe_options],
-        width=115,
+        width=140,
         value="",
         on_change=lambda e: on_tf_change(e)
     )
