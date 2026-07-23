@@ -1,7 +1,7 @@
 import flet as ft
 from ui.theme import *
 
-def make_textfield(label=None, value="", password=False, can_reveal_password=False, width=None, hint_text=None, on_change=None, on_blur=None):
+def make_textfield(label=None, value="", password=False, can_reveal_password=False, width=None, hint_text=None, on_change=None, on_blur=None, disabled=False):
     return ft.TextField(
         label=label,
         value=value,
@@ -20,10 +20,11 @@ def make_textfield(label=None, value="", password=False, can_reveal_password=Fal
         border_radius=8,
         content_padding=15,
         on_change=on_change,
-        on_blur=on_blur
+        on_blur=on_blur,
+        disabled=disabled
     )
 
-def make_dropdown(label=None, options=None, value=None, width=None, on_change=None):
+def make_dropdown(label=None, options=None, value=None, width=None, on_change=None, disabled=False):
     return ft.Dropdown(
         label=label,
         options=options or [],
@@ -39,5 +40,6 @@ def make_dropdown(label=None, options=None, value=None, width=None, on_change=No
         label_style=ft.TextStyle(color="#94a3b8", size=12, weight=ft.FontWeight.BOLD),
         border_radius=8,
         content_padding=15,
-        on_select=on_change
+        on_select=on_change,
+        disabled=disabled
     )
