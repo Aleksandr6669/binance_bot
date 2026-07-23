@@ -16,9 +16,9 @@ def build_models_view(page: ft.Page, lang: str):
 
     # Localization strings
     t_title = {"en": "AI Models Management", "ru": "Управление нейросетями и моделями ИИ", "uk": "Управління нейромережами та моделями ШІ"}.get(lang, "AI Models Management")
-    t_desc = {"en": "View trained DLinear + LightGBM models, inspect prediction error metrics, retrain, fine-tune, or delete models.",
-              "ru": "Просматривайте обученные модели DLinear + LightGBM, анализируйте ошибки (Loss), переобучайте, дообучайте или создавайте новые модели.",
-              "uk": "Переглядайте навчені моделі DLinear + LightGBM, аналізуйте помилки (Loss), перенавчайте, недонавчайте або створюйте нові моделі."}.get(lang, "")
+    t_desc = {"en": "View trained DLinear + LightGBM models, inspect Loss error metrics, retrain with TP/SL virtual bootstrapping, fine-tune or train new models.",
+              "ru": "Просматривайте обученные модели DLinear + LightGBM, анализируйте ошибки (Loss). При обучении выполняется псевдоторговля, проверка исходов TP/SL, расчёт уровней лимитных ордеров и трейлинг-стопа.",
+              "uk": "Переглядайте навчені моделі DLinear + LightGBM, аналізуйте помилки (Loss). При навчанні виконується псевдоторгівля, перевірка результатів TP/SL, розрахунок рівнів лімітних ордерів та трейлінг-стопу."}.get(lang, "")
     
     t_btn_create = {"en": "Train New Model", "ru": "Обучить новую модель", "uk": "Навчити нову модель"}.get(lang, "Train New Model")
     t_btn_refresh = {"en": "Refresh", "ru": "Обновить список", "uk": "Оновити список"}.get(lang, "Refresh")
@@ -106,7 +106,7 @@ def build_models_view(page: ft.Page, lang: str):
             # Button callbacks bound to pair and tf
             def make_retrain_handler(p=pair, t_frame=tf):
                 async def retrain_action(e):
-                    set_busy(True, f"Переобучение модели {p} ({t_frame}) с нуля на истории Binance..." if lang == "ru" else f"Retraining {p} ({t_frame}) model from scratch...")
+                    set_busy(True, f"Обучение с нуля {p} ({t_frame}): симуляция псевдоторговли, проверка TP/SL, расчёт уровней лимиток и ИИ-трейлинга..." if lang == "ru" else f"Retraining {p} ({t_frame}) with virtual TP/SL bootstrapping...")
                     try:
                         res = await asyncio.to_thread(scalping_ensemble.retrain_on_market_history, p, t_frame)
                         show_toast(f"Модель {p} ({t_frame}) успешно переобучена!" if lang == "ru" else f"Model {p} ({t_frame}) retrained successfully!")
@@ -119,7 +119,7 @@ def build_models_view(page: ft.Page, lang: str):
 
             def make_finetune_handler(p=pair, t_frame=tf):
                 async def finetune_action(e):
-                    set_busy(True, f"Дообучение (RL) модели {p} ({t_frame}) на истории ордеров..." if lang == "ru" else f"Fine-tuning {p} ({t_frame}) model...")
+                    set_busy(True, f"Дообучение (RL) модели {p} ({t_frame}) на истории ордеров и логах..." if lang == "ru" else f"Fine-tuning {p} ({t_frame}) model...")
                     try:
                         await asyncio.to_thread(scalping_ensemble.adapt_models_to_closed_orders)
                         show_toast(f"Модель {p} ({t_frame}) дообучена на обратной связи!" if lang == "ru" else f"Model {p} ({t_frame}) fine-tuned successfully!")
@@ -279,7 +279,7 @@ def build_models_view(page: ft.Page, lang: str):
         create_dialog.open = False
         page.update()
 
-        set_busy(True, f"Обучение новой модели DLinear + LightGBM для {new_pair} ({new_tf})..." if lang == "ru" else f"Training new model for {new_pair} ({new_tf})...")
+        set_busy(True, f"Обучение с нуля {new_pair} ({new_tf}): симуляция псевдоторговли, проверка TP/SL, расчёт уровней лимиток и ИИ-трейлинга..." if lang == "ru" else f"Training new model for {new_pair} ({new_tf})...")
         try:
             await asyncio.to_thread(scalping_ensemble.retrain_on_market_history, new_pair, new_tf)
             show_toast(f"Новая модель для {new_pair} ({new_tf}) успешно создана и обучена!" if lang == "ru" else f"New model for {new_pair} ({new_tf}) successfully created!")
@@ -293,11 +293,11 @@ def build_models_view(page: ft.Page, lang: str):
         title=ft.Text("Обучить новую модель ИИ" if lang == "ru" else "Train New AI Model", size=16, weight=ft.FontWeight.BOLD, color="#f8fafc"),
         content=ft.Container(
             content=ft.Column([
-                ft.Text("Выберите торговую пару и таймфрейм для обучения ансамбля DLinear + LightGBM с рынка Binance:" if lang == "ru" else "Select pair and timeframe to train DLinear + LightGBM model:", size=12, color="#94a3b8"),
+                ft.Text("Выберите торговую пару и таймфрейм. При обучении симулируется псевдоторговля, проверяются исходы TP/SL, уровни отложенных ордеров и профили волатильности для ИИ-Трейлинга:" if lang == "ru" else "Select pair and timeframe. Bootstrapping simulates virtual orders, TP/SL hits, limit offsets, and AI trailing stop profiles:", size=11, color="#94a3b8"),
                 pair_dd,
                 tf_dd
             ], spacing=15, tight=True),
-            width=400,
+            width=420,
             padding=10
         ),
         actions=[
@@ -314,11 +314,11 @@ def build_models_view(page: ft.Page, lang: str):
         create_dialog.open = True
         page.update()
 
-    # Top action bar
+    # Fixed top header bar (Non-scrollable)
     top_bar = ft.Row([
         ft.Column([
             ft.Text(t_title, size=22, weight=ft.FontWeight.BOLD, color="#f8fafc"),
-            ft.Text(t_desc, size=12, color="#94a3b8")
+            ft.Text(t_desc, size=11, color="#94a3b8")
         ], expand=True),
         ft.Row([
             ft.OutlinedButton(
@@ -334,7 +334,7 @@ def build_models_view(page: ft.Page, lang: str):
         ], spacing=10)
     ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER)
 
-    # Active info banner
+    # Fixed active info banner (Non-scrollable)
     active_info_banner = ft.Container(
         content=ft.Row([
             ft.Icon(ft.Icons.ELECTRIC_BOLT_ROUNDED, color=GOLD_COLOR, size=18),
@@ -342,18 +342,28 @@ def build_models_view(page: ft.Page, lang: str):
         ], spacing=8),
         bgcolor=ft.Colors.with_opacity(0.06, "#ffffff"),
         blur=DEFAULT_BLUR,
-        padding=ft.Padding.symmetric(vertical=12, horizontal=16),
+        padding=ft.Padding.symmetric(vertical=10, horizontal=16),
         border_radius=8,
         border=ft.Border.all(1, ft.Colors.with_opacity(0.12, "#ffffff"))
     )
 
-    main_column = ft.Column([
+    fixed_header = ft.Column([
         top_bar,
         active_info_banner,
-        ft.Divider(color=ft.Colors.with_opacity(0.08, "#ffffff"), height=20),
+        ft.Divider(color=ft.Colors.with_opacity(0.08, "#ffffff"), height=10),
+    ], spacing=10)
+
+    # Scrollable area containing ONLY the models grid
+    scrollable_content = ft.Column([
         loading_overlay,
         models_grid
-    ], spacing=15)
+    ], expand=True, scroll=ft.ScrollMode.AUTO, spacing=15)
+
+    # Main view layout - Header fixed at top, models grid scrollable below
+    main_column = ft.Column([
+        fixed_header,
+        scrollable_content
+    ], spacing=10, expand=True)
 
     refresh_models_list()
 
