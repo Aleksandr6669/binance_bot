@@ -220,39 +220,57 @@ def build_models_view(page: ft.Page, lang: str):
                     # Header row
                     ft.Row([
                         ft.Row([
-                            ft.Icon(ft.Icons.MEMORY_ROUNDED, size=22, color=GOLD_COLOR if is_active else "#94a3b8"),
-                            ft.Text(f"{pair} ({tf})", size=17, weight=ft.FontWeight.BOLD, color="#f8fafc"),
+                            ft.Icon(ft.Icons.MEMORY_ROUNDED, size=20, color=GOLD_COLOR if is_active else "#94a3b8"),
+                            ft.Text(f"{pair} ({tf})", size=16, weight=ft.FontWeight.BOLD, color="#f8fafc"),
                             active_badge
                         ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER),
                         ft.Container(
-                            content=ft.Text(clf_label_text, size=11, weight=ft.FontWeight.W_600, color=clf_badge_color),
-                            padding=ft.Padding.symmetric(vertical=4, horizontal=10),
+                            content=ft.Text(clf_label_text, size=10, weight=ft.FontWeight.BOLD, color=clf_badge_color),
+                            padding=ft.Padding.symmetric(vertical=3, horizontal=8),
                             border_radius=6,
                             bgcolor=ft.Colors.with_opacity(0.12, clf_badge_color),
-                            border=ft.Border.all(1, ft.Colors.with_opacity(0.3, clf_badge_color))
+                            border=ft.Border.all(1, ft.Colors.with_opacity(0.25, clf_badge_color))
                         )
                     ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER),
 
-                    ft.Divider(color=ft.Colors.with_opacity(0.08, "#ffffff"), height=16),
+                    ft.Divider(color=ft.Colors.with_opacity(0.06, "#ffffff"), height=14),
 
-                    # Metrics Grid
+                    # Metrics Columns matching history.py and decisions.py
                     ft.ResponsiveRow([
-                        make_metric_box(ft.Icons.ANALYTICS_OUTLINED, "Ошибка DLinear (Loss):" if lang == "ru" else "DLinear Error (Loss):", loss_str, value_color="#38bdf8", col_span=3),
-                        make_metric_box(ft.Icons.CANDLESTICK_CHART, "Свечей обучения:" if lang == "ru" else "Trained Candles:", f"{m['candles_count']:,}", value_color=GOLD_COLOR, col_span=3),
-                        make_metric_box(ft.Icons.PSYCHOLOGY_ALT, "RL Сэмплов:" if lang == "ru" else "RL Samples:", f"{m['feedback_count']}", value_color="#a78bfa", col_span=3),
-                        make_metric_box(ft.Icons.SCHEDULE, "Обновлено / Размер:" if lang == "ru" else "Updated / Size:", f"{m['mtime']} ({m['size_mb']} MB)", value_color="#cbd5e1", col_span=3),
+                        ft.Column([
+                            ft.Text("DLINEAR LOSS", size=9, color="#94a3b8", weight=ft.FontWeight.BOLD),
+                            ft.Text(loss_str, size=13, weight=ft.FontWeight.BOLD, color="#38bdf8")
+                        ], spacing=2, col={"xs": 6, "md": 3}),
+                        ft.Column([
+                            ft.Text("CANDLES TRAINED", size=9, color="#94a3b8", weight=ft.FontWeight.BOLD),
+                            ft.Text(f"{m['candles_count']:,}", size=13, weight=ft.FontWeight.BOLD, color="#f8fafc")
+                        ], spacing=2, col={"xs": 6, "md": 3}),
+                        ft.Column([
+                            ft.Text("RL SAMPLES", size=9, color="#94a3b8", weight=ft.FontWeight.BOLD),
+                            ft.Text(f"{m['feedback_count']}", size=13, weight=ft.FontWeight.BOLD, color="#a78bfa")
+                        ], spacing=2, col={"xs": 6, "md": 3}),
+                        ft.Column([
+                            ft.Text("UPDATED / SIZE", size=9, color="#94a3b8", weight=ft.FontWeight.BOLD),
+                            ft.Row([
+                                ft.Text(f"{m['mtime']}", size=11, color="#94a3b8"),
+                                ft.Text(f"({m['size_mb']} MB)", size=11, color="#64748b")
+                            ], spacing=4)
+                        ], spacing=2, col={"xs": 6, "md": 3}),
                     ], spacing=10),
 
-                    ft.Divider(color=ft.Colors.with_opacity(0.08, "#ffffff"), height=16),
+                    ft.Divider(color=ft.Colors.with_opacity(0.06, "#ffffff"), height=14),
 
-                    # Action buttons OR inline loader
+                    # Action area
                     action_area
                 ]),
-                bgcolor=COLOR_GLASS_BG if not is_active else ft.Colors.with_opacity(0.08, "#ffffff"),
-                blur=DEFAULT_BLUR,
-                padding=20,
+                bgcolor=ft.Colors.with_opacity(0.05, "#ffffff") if not is_active else ft.Colors.with_opacity(0.1, "#ffffff"),
+                blur=ft.Blur(10, 10, ft.BlurTileMode.MIRROR),
+                padding=ft.Padding(18, 14, 18, 14),
                 border_radius=12,
-                border=ft.Border.all(1.5 if is_active else 1, GOLD_COLOR if is_active else ft.Colors.with_opacity(0.12, "#ffffff")),
+                border=ft.Border.all(
+                    1.5 if is_active else 1,
+                    GOLD_COLOR if is_active else ft.Colors.with_opacity(0.1, "#ffffff")
+                ),
                 col={"xs": 12}
             )
             models_grid.controls.append(card)

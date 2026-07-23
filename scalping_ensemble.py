@@ -355,6 +355,36 @@ def save_models_to_disk(pair, timeframe):
         }
         with open(filepath, "wb") as f:
             pickle.dump(data, f)
+            
+        # Write fast JSON sidecar metadata file for instant UI loading
+        try:
+            import json
+            clf_name = type(classifier_model).__name__ if classifier_model is not None else ""
+            if "Booster" in clf_name or "lightgbm" in str(type(classifier_model)).lower():
+                classifier_type = "LightGBM (Gradient Boosting)"
+            else:
+                classifier_type = "NumPy Classifier"
+
+            stat = os.stat(filepath)
+            mtime = datetime.datetime.fromtimestamp(stat.st_mtime).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+            size_mb = round(stat.st_size / (1024 * 1024), 2)
+
+            meta_filepath = f"models/{pair.upper()}_{timeframe}.meta.json"
+            meta = {
+                "pair": pair.upper(),
+                "timeframe": timeframe,
+                "classifier_type": classifier_type,
+                "candles_count": len(market_candles),
+                "feedback_count": len(analysis_logs),
+                "loss": last_loss,
+                "mtime": mtime,
+                "size_mb": size_mb
+            }
+            with open(meta_filepath, "w", encoding="utf-8") as f_meta:
+                json.dump(meta, f_meta, ensure_ascii=False, indent=2)
+        except Exception as meta_ex:
+            logger.warning(f"Failed to write meta.json sidecar: {meta_ex}")
+
         logger.info(f"Модели и история для {pair} ({timeframe}) успешно сохранены на диск: {filepath}")
         return True
     except Exception as e:
@@ -442,9 +472,10 @@ def load_models_from_disk(pair, timeframe):
 
 def get_models_metadata_list():
     """
-    Возвращает список метаданных всех сохраненных моделей в папке models/
+    Возвращает список метаданных всех сохраненных моделей в папке models/.
+    Использует сверхбыстрые .meta.json файлы для мгновенной отклика интерфейса (0ms).
     """
-    import os, datetime, pickle
+    import os, datetime, pickle, json
     models_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
     if not os.path.exists(models_dir):
         return []
@@ -456,10 +487,25 @@ def get_models_metadata_list():
     for filename in files:
         filepath = os.path.join(models_dir, filename)
         name_no_ext = filename[:-4]
+        meta_filepath = os.path.join(models_dir, f"{name_no_ext}.meta.json")
+        
         parts = name_no_ext.split("_")
         pair = parts[0].upper() if len(parts) > 0 else "UNKNOWN"
         timeframe = parts[1] if len(parts) > 1 else "1m"
         
+        # 1. Попытка прочитать готовый мелкий JSON файл (мгновенно)
+        if os.path.exists(meta_filepath):
+            try:
+                with open(meta_filepath, "r", encoding="utf-8") as f_meta:
+                    meta = json.load(f_meta)
+                    meta["filename"] = filename
+                    meta["filepath"] = filepath
+                    result.append(meta)
+                    continue
+            except Exception:
+                pass
+        
+        # 2. Фолбэк на замер pickle (только при первом запуске без json)
         try:
             stat = os.stat(filepath)
             mtime = datetime.datetime.fromtimestamp(stat.st_mtime).astimezone().strftime("%Y-%m-%d %H:%M:%S")
@@ -470,7 +516,7 @@ def get_models_metadata_list():
         
         candles_count = 0
         feedback_count = 0
-        classifier_type = "NumPy Classifier (Fallback)"
+        classifier_type = "NumPy Classifier"
         loss_val = 0.000016
         
         try:
@@ -486,12 +532,29 @@ def get_models_metadata_list():
                     if "Booster" in clf_name or "lightgbm" in str(type(clf)).lower():
                         classifier_type = "LightGBM (Gradient Boosting)"
                     else:
-                        classifier_type = f"NumPy Classifier"
+                        classifier_type = "NumPy Classifier"
                 
                 if "loss" in data and data["loss"] is not None:
                     loss_val = float(data["loss"])
                 elif dl is not None and hasattr(dl, "last_loss"):
                     loss_val = float(dl.last_loss)
+                    
+                # Создаем meta.json для последующих мгновенных загрузок
+                try:
+                    meta_to_write = {
+                        "pair": pair,
+                        "timeframe": timeframe,
+                        "classifier_type": classifier_type,
+                        "candles_count": candles_count,
+                        "feedback_count": feedback_count,
+                        "loss": loss_val,
+                        "mtime": mtime,
+                        "size_mb": size_mb
+                    }
+                    with open(meta_filepath, "w", encoding="utf-8") as f_meta:
+                        json.dump(meta_to_write, f_meta, ensure_ascii=False, indent=2)
+                except Exception:
+                    pass
         except Exception:
             pass
             
@@ -511,12 +574,20 @@ def get_models_metadata_list():
     return result
 
 def delete_model_file(pair, timeframe):
-    """Удаляет файл модели с диска."""
+    """Удаляет файл модели (.pkl и .meta.json) с диска."""
     try:
         filename = f"models/{pair.upper()}_{timeframe}.pkl"
         filepath = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
+        meta_filepath = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"models/{pair.upper()}_{timeframe}.meta.json")
+        
+        deleted = False
         if os.path.exists(filepath):
             os.remove(filepath)
+            deleted = True
+        if os.path.exists(meta_filepath):
+            os.remove(meta_filepath)
+            
+        if deleted:
             logger.info(f"Файл модели {filename} успешно удален.")
             return True
         return False
