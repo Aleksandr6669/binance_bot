@@ -28,28 +28,7 @@ def build_models_view(page: ft.Page, lang: str):
     t_no_models = {"en": "No trained model files found in models/ directory.", "ru": "Обученные модели не найдены в папке models/.", "uk": "Навчені моделі не знайдені в папці models/."}.get(lang, "")
 
     models_grid = ft.ResponsiveRow(spacing=16)
-    loading_text = ft.Text("", size=13, color="#f8fafc", weight=ft.FontWeight.W_500)
-
-    loading_overlay = ft.Container(
-        content=ft.Column([
-            ft.ProgressRing(color=GOLD_COLOR, width=48, height=48),
-            loading_text
-        ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, alignment=ft.MainAxisAlignment.CENTER, spacing=15),
-        bgcolor=ft.Colors.with_opacity(0.88, "#030407"),
-        blur=DEFAULT_BLUR,
-        padding=30,
-        border_radius=12,
-        alignment=ft.alignment.Alignment(0, 0),
-        visible=False
-    )
-
-    def set_busy(is_busy: bool, message: str = ""):
-        loading_overlay.visible = is_busy
-        loading_text.value = message
-        try:
-            page.update()
-        except Exception:
-            pass
+    active_tasks = {} # Dict tracking in-progress training per model: "PAIR_TF" -> status_msg
 
     def show_toast(msg: str, color=GREEN_COLOR):
         try:
@@ -62,6 +41,22 @@ def build_models_view(page: ft.Page, lang: str):
     def refresh_models_list():
         models_grid.controls.clear()
         models = scalping_ensemble.get_models_metadata_list()
+
+        # Inject placeholder entries for models currently training that are not on disk yet
+        for task_key, task_msg in active_tasks.items():
+            if "_" in task_key:
+                p, tf = task_key.split("_", 1)
+                if not any(m["pair"] == p and m["timeframe"] == tf for m in models):
+                    models.append({
+                        "pair": p,
+                        "timeframe": tf,
+                        "loss": None,
+                        "candles_count": 0,
+                        "feedback_count": 0,
+                        "size_mb": "0.0",
+                        "mtime": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "classifier_type": "LightGBM Classifier"
+                    })
 
         if not models:
             models_grid.controls.append(
@@ -83,6 +78,10 @@ def build_models_view(page: ft.Page, lang: str):
         for m in models:
             pair = m["pair"]
             tf = m["timeframe"]
+            task_key = f"{pair}_{tf}"
+            is_training = task_key in active_tasks
+            training_msg = active_tasks.get(task_key, "")
+
             is_active = (pair == active_pair and tf == active_tf)
             loss_val = m["loss"]
             loss_str = f"{loss_val:.6f}" if loss_val is not None else "0.000016"
@@ -106,27 +105,31 @@ def build_models_view(page: ft.Page, lang: str):
             # Button callbacks bound to pair and tf
             def make_retrain_handler(p=pair, t_frame=tf):
                 async def retrain_action(e):
-                    set_busy(True, f"Обучение с нуля {p} ({t_frame}): псевдоторговля, проверка TP/SL, отступы лимиток и ИИ-трейлинг..." if lang == "ru" else f"Retraining {p} ({t_frame}) from scratch...")
+                    t_key = f"{p}_{t_frame}"
+                    active_tasks[t_key] = f"Обучение с нуля {p} ({t_frame}): псевдоторговля, проверка TP/SL, отступы лимиток и ИИ-трейлинг..." if lang == "ru" else f"Retraining {p} ({t_frame}) from scratch..."
+                    refresh_models_list()
                     try:
                         res = await asyncio.to_thread(scalping_ensemble.bootstrap_virtual_training, p, t_frame)
                         show_toast(f"Модель {p} ({t_frame}) успешно переобучена с нуля!" if lang == "ru" else f"Model {p} ({t_frame}) retrained successfully!")
                     except Exception as ex:
                         show_toast(f"Ошибка переобучения: {ex}", color=RED_COLOR)
                     finally:
-                        set_busy(False)
+                        active_tasks.pop(t_key, None)
                         refresh_models_list()
                 return retrain_action
 
             def make_finetune_handler(p=pair, t_frame=tf):
                 async def finetune_action(e):
-                    set_busy(True, f"Дообучение (RL) модели {p} ({t_frame}) на закрытых ордерах и логах..." if lang == "ru" else f"Fine-tuning {p} ({t_frame}) model...")
+                    t_key = f"{p}_{t_frame}"
+                    active_tasks[t_key] = f"Дообучение (RL) модели {p} ({t_frame}) на закрытых ордерах и логах..." if lang == "ru" else f"Fine-tuning {p} ({t_frame}) model..."
+                    refresh_models_list()
                     try:
                         res = await asyncio.to_thread(scalping_ensemble.adapt_models_to_closed_orders, p, t_frame)
                         show_toast(f"Модель {p} ({t_frame}) дообучена на обратной связи!" if lang == "ru" else f"Model {p} ({t_frame}) fine-tuned successfully!")
                     except Exception as ex:
                         show_toast(f"Ошибка дообучения: {ex}", color=RED_COLOR)
                     finally:
-                        set_busy(False)
+                        active_tasks.pop(t_key, None)
                         refresh_models_list()
                 return finetune_action
 
@@ -160,6 +163,58 @@ def build_models_view(page: ft.Page, lang: str):
                     col={"xs": 6, "md": col_span}
                 )
 
+            # Bottom action area: Normal buttons OR inline progress bar for this specific card
+            if is_training:
+                action_area = ft.Container(
+                    content=ft.Row([
+                        ft.ProgressRing(color=GOLD_COLOR, width=18, height=18, stroke_width=2.5),
+                        ft.Text(training_msg, size=12, color=GOLD_COLOR, weight=ft.FontWeight.W_500, expand=True)
+                    ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                    bgcolor=ft.Colors.with_opacity(0.08, GOLD_COLOR),
+                    padding=ft.Padding.symmetric(vertical=10, horizontal=14),
+                    border_radius=8,
+                    border=ft.Border.all(1, ft.Colors.with_opacity(0.25, GOLD_COLOR))
+                )
+            else:
+                action_area = ft.Row([
+                    ft.ElevatedButton(
+                        content=ft.Row([
+                            ft.Icon(ft.Icons.AUTORENEW_ROUNDED, size=15, color="#030407"),
+                            ft.Text(t_retrain, size=12, color="#030407", weight=ft.FontWeight.BOLD)
+                        ], spacing=6),
+                        style=ft.ButtonStyle(
+                            bgcolor=GOLD_COLOR,
+                            shape=ft.RoundedRectangleBorder(radius=8),
+                            padding=ft.Padding.symmetric(vertical=10, horizontal=14)
+                        ),
+                        on_click=make_retrain_handler(pair, tf)
+                    ),
+                    ft.OutlinedButton(
+                        content=ft.Row([
+                            ft.Icon(ft.Icons.FLASH_ON_ROUNDED, size=15, color="#a78bfa"),
+                            ft.Text(t_finetune, size=12, color="#a78bfa", weight=ft.FontWeight.BOLD)
+                        ], spacing=6),
+                        style=ft.ButtonStyle(
+                            side=ft.BorderSide(1, "#a78bfa"),
+                            shape=ft.RoundedRectangleBorder(radius=8),
+                            padding=ft.Padding.symmetric(vertical=10, horizontal=14)
+                        ),
+                        on_click=make_finetune_handler(pair, tf)
+                    ),
+                    ft.Container(
+                        content=ft.IconButton(
+                            icon=ft.Icons.DELETE_OUTLINED,
+                            icon_color=RED_COLOR,
+                            icon_size=18,
+                            tooltip=t_delete,
+                            on_click=make_delete_handler(pair, tf)
+                        ),
+                        bgcolor=ft.Colors.with_opacity(0.08, RED_COLOR),
+                        border_radius=8,
+                        border=ft.Border.all(1, ft.Colors.with_opacity(0.2, RED_COLOR))
+                    )
+                ], alignment=ft.MainAxisAlignment.END, spacing=10)
+
             card = ft.Container(
                 content=ft.Column([
                     # Header row
@@ -190,45 +245,8 @@ def build_models_view(page: ft.Page, lang: str):
 
                     ft.Divider(color=ft.Colors.with_opacity(0.08, "#ffffff"), height=16),
 
-                    # Action buttons row
-                    ft.Row([
-                        ft.ElevatedButton(
-                            content=ft.Row([
-                                ft.Icon(ft.Icons.AUTORENEW_ROUNDED, size=15, color="#030407"),
-                                ft.Text(t_retrain, size=12, color="#030407", weight=ft.FontWeight.BOLD)
-                            ], spacing=6),
-                            style=ft.ButtonStyle(
-                                bgcolor=GOLD_COLOR,
-                                shape=ft.RoundedRectangleBorder(radius=8),
-                                padding=ft.Padding.symmetric(vertical=10, horizontal=14)
-                            ),
-                            on_click=make_retrain_handler(pair, tf)
-                        ),
-                        ft.OutlinedButton(
-                            content=ft.Row([
-                                ft.Icon(ft.Icons.FLASH_ON_ROUNDED, size=15, color="#a78bfa"),
-                                ft.Text(t_finetune, size=12, color="#a78bfa", weight=ft.FontWeight.BOLD)
-                            ], spacing=6),
-                            style=ft.ButtonStyle(
-                                side=ft.BorderSide(1, "#a78bfa"),
-                                shape=ft.RoundedRectangleBorder(radius=8),
-                                padding=ft.Padding.symmetric(vertical=10, horizontal=14)
-                            ),
-                            on_click=make_finetune_handler(pair, tf)
-                        ),
-                        ft.Container(
-                            content=ft.IconButton(
-                                icon=ft.Icons.DELETE_OUTLINED,
-                                icon_color=RED_COLOR,
-                                icon_size=18,
-                                tooltip=t_delete,
-                                on_click=make_delete_handler(pair, tf)
-                            ),
-                            bgcolor=ft.Colors.with_opacity(0.08, RED_COLOR),
-                            border_radius=8,
-                            border=ft.Border.all(1, ft.Colors.with_opacity(0.2, RED_COLOR))
-                        )
-                    ], alignment=ft.MainAxisAlignment.END, spacing=10)
+                    # Action buttons OR inline loader
+                    action_area
                 ]),
                 bgcolor=COLOR_GLASS_BG if not is_active else ft.Colors.with_opacity(0.08, "#ffffff"),
                 blur=DEFAULT_BLUR,
@@ -279,14 +297,17 @@ def build_models_view(page: ft.Page, lang: str):
         create_dialog.open = False
         page.update()
 
-        set_busy(True, f"Обучение с нуля {new_pair} ({new_tf}): симуляция псевдоторговли, проверка TP/SL, расчёт уровней лимиток и ИИ-трейлинга..." if lang == "ru" else f"Training new model for {new_pair} ({new_tf})...")
+        t_key = f"{new_pair}_{new_tf}"
+        active_tasks[t_key] = f"Обучение с нуля {new_pair} ({new_tf}): псевдоторговля, проверка TP/SL, отступы лимиток и ИИ-трейлинг..." if lang == "ru" else f"Training new model for {new_pair} ({new_tf})..."
+        refresh_models_list()
+
         try:
-            await asyncio.to_thread(scalping_ensemble.retrain_on_market_history, new_pair, new_tf)
+            await asyncio.to_thread(scalping_ensemble.bootstrap_virtual_training, new_pair, new_tf)
             show_toast(f"Новая модель для {new_pair} ({new_tf}) успешно создана и обучена!" if lang == "ru" else f"New model for {new_pair} ({new_tf}) successfully created!")
         except Exception as ex:
             show_toast(f"Ошибка создания модели: {ex}", color=RED_COLOR)
         finally:
-            set_busy(False)
+            active_tasks.pop(t_key, None)
             refresh_models_list()
 
     create_dialog = ft.AlertDialog(
@@ -361,7 +382,6 @@ def build_models_view(page: ft.Page, lang: str):
 
     # Scrollable area containing ONLY the models grid
     scrollable_content = ft.Column([
-        loading_overlay,
         models_grid
     ], expand=True, scroll=ft.ScrollMode.AUTO, spacing=15)
 
