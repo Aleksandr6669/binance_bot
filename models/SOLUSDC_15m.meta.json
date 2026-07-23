@@ -1,0 +1,10 @@
+{
+  "pair": "SOLUSDC",
+  "timeframe": "15m",
+  "classifier_type": "LightGBM (Gradient Boosting)",
+  "candles_count": 29495,
+  "feedback_count": 115,
+  "loss": 1.5407027490523214e-05,
+  "mtime": "2026-07-23 11:51:27",
+  "size_mb": 4.33
+}

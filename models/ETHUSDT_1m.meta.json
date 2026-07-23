@@ -1,0 +1,10 @@
+{
+  "pair": "ETHUSDT",
+  "timeframe": "1m",
+  "classifier_type": "LightGBM (Gradient Boosting)",
+  "candles_count": 2751,
+  "feedback_count": 20,
+  "loss": 1.648715357267119e-05,
+  "mtime": "2026-07-23 11:50:24",
+  "size_mb": 0.48
+}
