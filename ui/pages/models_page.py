@@ -42,8 +42,14 @@ def build_models_view(page: ft.Page, lang: str):
         models_grid.controls.clear()
         models = scalping_ensemble.get_models_metadata_list()
 
+        # Sync active background training tasks from scalping_ensemble engine
+        st = scalping_ensemble.get_training_status()
+        if st and st.get("active"):
+            st_key = f"{st['pair']}_{st['timeframe']}"
+            active_tasks[st_key] = st.get("msg", f"Обучение нейросети {st['pair']} ({st['timeframe']})...")
+
         # Inject placeholder entries for models currently training that are not on disk yet
-        for task_key, task_msg in active_tasks.items():
+        for task_key, task_msg in list(active_tasks.items()):
             if "_" in task_key:
                 p, tf = task_key.split("_", 1)
                 if not any(m["pair"] == p and m["timeframe"] == tf for m in models):

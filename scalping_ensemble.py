@@ -1,5 +1,6 @@
 import asyncio
 import time
+import datetime
 import logging
 from collections import deque
 import numpy as np
@@ -305,8 +306,15 @@ training_status = {
     "active": False,
     "pair": "",
     "timeframe": "",
+    "msg": "",
     "started_at": 0.0
 }
+
+def get_training_status():
+    global training_status
+    if training_status and training_status.get("active"):
+        return dict(training_status)
+    return {"active": False}
 
 def predict_ai_trailing_distance(features):
     """
@@ -1004,6 +1012,7 @@ def retrain_on_market_history(pair, timeframe):
         "active": True,
         "pair": pair.upper(),
         "timeframe": timeframe,
+        "msg": f"Дообучение (RL) модели {pair.upper()} ({timeframe}) на закрытых ордерах и логах...",
         "started_at": time.time()
     }
     try:
@@ -1431,6 +1440,7 @@ def bootstrap_virtual_training(pair, timeframe):
         "active": True,
         "pair": pair.upper(),
         "timeframe": timeframe,
+        "msg": f"Обучение с нуля {pair.upper()} ({timeframe}): псевдоторговля, проверка TP/SL, отступы лимиток и ИИ-трейлинг...",
         "started_at": time.time()
     }
     try:
