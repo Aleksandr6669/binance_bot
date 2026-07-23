@@ -173,7 +173,7 @@ def build_models_view(page: ft.Page, lang: str):
                 action_area = ft.Container(
                     content=ft.Row([
                         ft.ProgressRing(color=GOLD_COLOR, width=15, height=15, stroke_width=2),
-                        ft.Text(training_msg, size=11, color=GOLD_COLOR, weight=ft.FontWeight.W_500)
+                        ft.Text(training_msg, size=11, color=GOLD_COLOR, weight=ft.FontWeight.W_500, expand=True)
                     ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
                     bgcolor=ft.Colors.with_opacity(0.08, GOLD_COLOR),
                     padding=ft.Padding.symmetric(vertical=6, horizontal=10),
@@ -190,7 +190,7 @@ def build_models_view(page: ft.Page, lang: str):
                         style=ft.ButtonStyle(
                             bgcolor=GOLD_COLOR,
                             shape=ft.RoundedRectangleBorder(radius=6),
-                            padding=ft.Padding.symmetric(vertical=6, horizontal=10)
+                            padding=ft.Padding.symmetric(vertical=5, horizontal=10)
                         ),
                         on_click=make_retrain_handler(pair, tf)
                     ),
@@ -202,7 +202,7 @@ def build_models_view(page: ft.Page, lang: str):
                         style=ft.ButtonStyle(
                             side=ft.BorderSide(1, "#a78bfa"),
                             shape=ft.RoundedRectangleBorder(radius=6),
-                            padding=ft.Padding.symmetric(vertical=6, horizontal=10)
+                            padding=ft.Padding.symmetric(vertical=5, horizontal=10)
                         ),
                         on_click=make_finetune_handler(pair, tf)
                     ),
@@ -222,25 +222,24 @@ def build_models_view(page: ft.Page, lang: str):
 
             card = ft.Container(
                 content=ft.Column([
-                    # Header row: Pair info + Badges on left, Action buttons on right
+                    # Header row: Pair info + Active badge on left, Classifier badge on right
                     ft.Row([
                         ft.Row([
                             ft.Icon(ft.Icons.MEMORY_ROUNDED, size=18, color=GOLD_COLOR if is_active else "#94a3b8"),
                             ft.Text(f"{pair} ({tf})", size=15, weight=ft.FontWeight.BOLD, color="#f8fafc"),
                             active_badge,
-                            ft.Container(
-                                content=ft.Text(clf_label_text, size=9, weight=ft.FontWeight.BOLD, color=clf_badge_color),
-                                padding=ft.Padding.symmetric(vertical=2, horizontal=7),
-                                border_radius=6,
-                                bgcolor=ft.Colors.with_opacity(0.12, clf_badge_color),
-                                border=ft.Border.all(1, ft.Colors.with_opacity(0.25, clf_badge_color))
-                            )
-                        ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER, wrap=True),
+                        ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
 
-                        action_area
+                        ft.Container(
+                            content=ft.Text(clf_label_text, size=9, weight=ft.FontWeight.BOLD, color=clf_badge_color),
+                            padding=ft.Padding.symmetric(vertical=2, horizontal=7),
+                            border_radius=6,
+                            bgcolor=ft.Colors.with_opacity(0.12, clf_badge_color),
+                            border=ft.Border.all(1, ft.Colors.with_opacity(0.25, clf_badge_color))
+                        )
                     ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER),
 
-                    ft.Divider(color=ft.Colors.with_opacity(0.06, "#ffffff"), height=8),
+                    ft.Divider(color=ft.Colors.with_opacity(0.06, "#ffffff"), height=6),
 
                     # Metrics Columns matching history.py and decisions.py
                     ft.ResponsiveRow([
@@ -265,7 +264,7 @@ def build_models_view(page: ft.Page, lang: str):
                         ], spacing=1, col={"xs": 6, "md": 3}),
                     ], spacing=6),
 
-                    ft.Divider(color=ft.Colors.with_opacity(0.06, "#ffffff"), height=8),
+                    ft.Divider(color=ft.Colors.with_opacity(0.06, "#ffffff"), height=6),
 
                     # Trades Stats Row (Virtual vs Real/Demo)
                     ft.ResponsiveRow([
@@ -306,12 +305,17 @@ def build_models_view(page: ft.Page, lang: str):
                                 )
                             ], spacing=5, vertical_alignment=ft.CrossAxisAlignment.CENTER)
                         ], spacing=1, col={"xs": 12, "md": 6})
-                    ], spacing=6)
+                    ], spacing=6),
+
+                    ft.Divider(color=ft.Colors.with_opacity(0.06, "#ffffff"), height=6),
+
+                    # Action / Loader row
+                    action_area
                 ]),
                 bgcolor=ft.Colors.with_opacity(0.05, "#ffffff") if not is_active else ft.Colors.with_opacity(0.1, "#ffffff"),
                 blur=ft.Blur(10, 10, ft.BlurTileMode.MIRROR),
-                padding=ft.Padding(18, 14, 18, 14),
-                border_radius=12,
+                padding=ft.Padding(14, 10, 14, 10),
+                border_radius=10,
                 border=ft.Border.all(
                     1.5 if is_active else 1,
                     GOLD_COLOR if is_active else ft.Colors.with_opacity(0.1, "#ffffff")
