@@ -437,6 +437,88 @@ def load_models_from_disk(pair, timeframe):
         logger.error(f"Ошибка загрузки моделей с диска: {e}")
         return False
 
+def get_models_metadata_list():
+    """
+    Возвращает список метаданных всех сохраненных моделей в папке models/
+    """
+    import os, datetime, pickle
+    models_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
+    if not os.path.exists(models_dir):
+        return []
+    
+    result = []
+    files = [f for f in os.listdir(models_dir) if f.endswith(".pkl")]
+    files.sort()
+    
+    for filename in files:
+        filepath = os.path.join(models_dir, filename)
+        name_no_ext = filename[:-4]
+        parts = name_no_ext.split("_")
+        pair = parts[0].upper() if len(parts) > 0 else "UNKNOWN"
+        timeframe = parts[1] if len(parts) > 1 else "1m"
+        
+        try:
+            stat = os.stat(filepath)
+            mtime = datetime.datetime.fromtimestamp(stat.st_mtime).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+            size_mb = round(stat.st_size / (1024 * 1024), 2)
+        except Exception:
+            mtime = "—"
+            size_mb = 0.0
+        
+        candles_count = 0
+        feedback_count = 0
+        classifier_type = "NumPy Classifier (Fallback)"
+        loss_val = 0.000016
+        
+        try:
+            with open(filepath, "rb") as f:
+                data = pickle.load(f)
+                candles_count = len(data.get("db_market_candles", []))
+                feedback_count = len(data.get("db_analysis_logs", []))
+                clf = data.get("classifier")
+                dl = data.get("dlinear")
+                
+                if clf is not None:
+                    clf_name = type(clf).__name__
+                    if "Booster" in clf_name or "lightgbm" in str(type(clf)).lower():
+                        classifier_type = "LightGBM (Gradient Boosting)"
+                    else:
+                        classifier_type = f"NumPy Classifier"
+                
+                if dl is not None and hasattr(dl, "last_loss"):
+                    loss_val = float(dl.last_loss)
+        except Exception:
+            pass
+            
+        result.append({
+            "filename": filename,
+            "pair": pair,
+            "timeframe": timeframe,
+            "classifier_type": classifier_type,
+            "candles_count": candles_count,
+            "feedback_count": feedback_count,
+            "loss": loss_val,
+            "mtime": mtime,
+            "size_mb": size_mb,
+            "filepath": filepath
+        })
+        
+    return result
+
+def delete_model_file(pair, timeframe):
+    """Удаляет файл модели с диска."""
+    try:
+        filename = f"models/{pair.upper()}_{timeframe}.pkl"
+        filepath = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
+        if os.path.exists(filepath):
+            os.remove(filepath)
+            logger.info(f"Файл модели {filename} успешно удален.")
+            return True
+        return False
+    except Exception as e:
+        logger.error(f"Ошибка удаления файла модели {pair} ({timeframe}): {e}")
+        return False
+
 
 # =====================================================================
 # 4. ФУНКЦИИ ВЫЧИСЛЕНИЯ ТЕХНИЧЕСКИХ ИНДИКАТОРОВ

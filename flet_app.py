@@ -9,6 +9,7 @@ from ui.pages.login import build_login_view
 from ui.pages.dashboard import build_dashboard_view
 from ui.pages.history import build_history_view
 from ui.pages.decisions import build_decisions_view
+from ui.pages.models_page import build_models_view
 from ui.pages.settings import build_settings_view
 
 _tz_cache = {}
@@ -112,8 +113,8 @@ def main(page: ft.Page):
             page._content_cache = {}
 
         cache_key = (page.route, lang)
-        # history, decisions and settings always rebuild to show fresh data
-        NO_CACHE_ROUTES = {"/history", "/decisions", "/settings"}
+        # history, decisions, models and settings always rebuild to show fresh data
+        NO_CACHE_ROUTES = {"/history", "/decisions", "/models", "/settings"}
 
         if cache_key in page._content_cache:
             content = page._content_cache[cache_key]
@@ -127,6 +128,8 @@ def main(page: ft.Page):
                 content = build_history_view(page, lang)
             elif page.route == "/decisions":
                 content = build_decisions_view(page, lang)
+            elif page.route == "/models":
+                content = build_models_view(page, lang)
             elif page.route == "/settings":
                 content = build_settings_view(page, lang)
 

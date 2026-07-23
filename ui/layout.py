@@ -8,11 +8,12 @@ ROUTE_INDEX = {
     "/dashboard": 0,
     "/history": 1,
     "/decisions": 2,
-    "/settings": 3,
+    "/models": 3,
+    "/settings": 4,
 }
 
 def handle_nav_change(page, index):
-    routes = ["/dashboard", "/history", "/decisions", "/settings"]
+    routes = ["/dashboard", "/history", "/decisions", "/models", "/settings"]
     if 0 <= index < len(routes):
         page.go(routes[index])
 
@@ -374,18 +375,20 @@ def build_layout(page: ft.Page, content_control, active_index: int, lang: str):
     t_nav_dash = {"en": "Trading Terminal", "ru": "Торговый терминал", "uk": "Торговий термінал"}.get(lang, "Trading Terminal")
     t_nav_hist = {"en": "Order History", "ru": "Все ордера", "uk": "Усі ордери"}.get(lang, "Order History")
     t_nav_dec = {"en": "AI Decisions", "ru": "AI Решения", "uk": "Рішення ШІ"}.get(lang, "AI Decisions")
+    t_nav_mod = {"en": "AI Models", "ru": "Модели ИИ", "uk": "Моделі ШІ"}.get(lang, "AI Models")
     t_nav_set = {"en": "Settings", "ru": "Настройки", "uk": "Налаштування"}.get(lang, "Settings")
 
     nav_dash = make_nav(t_nav_dash, "/dashboard", ft.Icons.SHOW_CHART_ROUNDED)
     nav_hist = make_nav(t_nav_hist, "/history", ft.Icons.LIST_ALT_ROUNDED)
     nav_dec  = make_nav(t_nav_dec, "/decisions", ft.Icons.PSYCHOLOGY_ROUNDED)
+    nav_mod  = make_nav(t_nav_mod, "/models", ft.Icons.MEMORY_ROUNDED)
     nav_set  = make_nav(t_nav_set, "/settings", ft.Icons.SETTINGS_ROUNDED)
 
     navbar = ft.Container(
         content=ft.Row([
             logo_btn,
-            ft.Row([nav_dash, nav_hist, nav_dec, nav_set, clock_container, lang_row],
-                   spacing=16,
+            ft.Row([nav_dash, nav_hist, nav_dec, nav_mod, nav_set, clock_container, lang_row],
+                   spacing=14,
                    alignment=ft.MainAxisAlignment.END,
                    vertical_alignment=ft.CrossAxisAlignment.CENTER),
         ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
