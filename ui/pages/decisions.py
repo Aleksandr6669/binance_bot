@@ -25,6 +25,9 @@ def extract_log_timeframe(log):
     if not isinstance(log, dict):
         return "1m"
         
+    if log.get("timeframe"):
+        return str(log["timeframe"])
+
     s3 = log.get("stage3_output")
     if isinstance(s3, str) and "timeframe" in s3:
         try:
@@ -35,12 +38,10 @@ def extract_log_timeframe(log):
             pass
 
     s1 = str(log.get("stage1_output") or "")
-    if " Scalping" in s1:
-        parts = s1.split(" Scalping")[0].strip().split()
-        if parts:
-            candidate = parts[-1]
-            if candidate in ["1m", "3m", "5m", "15m", "30m", "1h", "4h", "1d"]:
-                return candidate
+    import re
+    match = re.search(r'\b(1m|3m|5m|15m|30m|1h|4h|1d)\b', s1, re.IGNORECASE)
+    if match:
+        return match.group(1).lower()
 
     return "1m"
 
@@ -392,13 +393,13 @@ def build_decisions_view(page: ft.Page, lang: str):
         logs = await asyncio.to_thread(db.get_filtered_analysis_logs, pair=None, date=filter_state["date"] or None, tz_offset_min=tz_offset)
         
         pair_query = (filter_state["pair"] or "").strip().upper()
-        selected_tf = filter_state.get("tf", "ALL")
+        selected_tf = (filter_state.get("tf") or "").strip()
         filtered_logs = []
         for log in (logs or []):
             if pair_query and pair_query not in (log.get("pair") or "").upper():
                 continue
             tf_val = extract_log_timeframe(log)
-            if selected_tf != "ALL" and tf_val != selected_tf:
+            if selected_tf and selected_tf != "ALL" and tf_val.lower() != selected_tf.lower():
                 continue
             # Display all decisions, including neutral (HOLD) signals
             filtered_logs.append(log)
@@ -427,30 +428,29 @@ def build_decisions_view(page: ft.Page, lang: str):
     pair_field.on_change = on_pair_change
 
     # ---------- Timeframe Filter Dropdown ----------
-    tf_dropdown = ft.Dropdown(
-        options=[
-            ft.dropdown.Option("ALL", "Все TF" if lang == "ru" else "All TF"),
-            ft.dropdown.Option("1m", "1m"),
-            ft.dropdown.Option("3m", "3m"),
-            ft.dropdown.Option("5m", "5m"),
-            ft.dropdown.Option("15m", "15m"),
-        ],
-        value="ALL",
-        width=84,
-        height=48,
-        text_size=10,
-        color="#f8fafc",
-        border_color=ft.Colors.with_opacity(0.3, "#ffffff"),
-        border_radius=8,
-        bgcolor=BG_COLOR,
-        content_padding=ft.Padding(6, 0, 6, 0)
+    timeframe_options = [
+        ("", "Все" if lang == "ru" else "All"),
+        ("1m", "1m"),
+        ("3m", "3m"),
+        ("5m", "5m"),
+        ("15m", "15m"),
+        ("30m", "30m"),
+        ("1h", "1h")
+    ]
+    tf_dropdown = make_dropdown(
+        label=None,
+        options=[ft.dropdown.Option(k, v) for k, v in timeframe_options],
+        width=115,
+        value="",
+        on_change=lambda e: on_tf_change(e)
     )
+    tf_dropdown.height = 48
+    tf_dropdown.content_padding = ft.Padding(10, 14, 10, 14)
+    tf_dropdown.text_style = ft.TextStyle(size=10)
 
     def on_tf_change(e):
-        filter_state["tf"] = tf_dropdown.value or "ALL"
+        filter_state["tf"] = tf_dropdown.value or ""
         run_apply()
-
-    tf_dropdown.on_change = on_tf_change
 
     # ---------- Single date picker ----------
     date_text = ft.Text(filter_state["date"], size=10, color="#f8fafc")
@@ -558,13 +558,13 @@ def build_decisions_view(page: ft.Page, lang: str):
                     continue
 
                 pair_query = (filter_state["pair"] or "").strip().upper()
-                selected_tf = filter_state.get("tf", "ALL")
+                selected_tf = (filter_state.get("tf") or "").strip()
                 filtered_logs = []
                 for log in (logs or []):
                     if pair_query and pair_query not in (log.get("pair") or "").upper():
                         continue
                     tf_val = extract_log_timeframe(log)
-                    if selected_tf != "ALL" and tf_val != selected_tf:
+                    if selected_tf and selected_tf != "ALL" and tf_val.lower() != selected_tf.lower():
                         continue
                     filtered_logs.append(log)
 
