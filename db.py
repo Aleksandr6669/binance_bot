@@ -239,6 +239,22 @@ def get_order_history():
     conn.close()
     return [dict(row) for row in rows]
 
+def get_recent_closed_orders(pair=None, limit=10):
+    """Возвращает N последних закрытых ордеров (с PnL)."""
+    conn = get_db_connection()
+    if pair:
+        rows = conn.execute(
+            "SELECT * FROM orders WHERE status NOT IN ('ACTIVE', 'PENDING') AND pair = ? ORDER BY closed_at DESC LIMIT ?",
+            (pair.upper(), limit)
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM orders WHERE status NOT IN ('ACTIVE', 'PENDING') ORDER BY closed_at DESC LIMIT ?",
+            (limit,)
+        ).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
 def get_bot_pnl_since(since_timestamp):
     conn = get_db_connection()
     settings_row = conn.execute("SELECT trading_mode FROM settings WHERE id = 1").fetchone()

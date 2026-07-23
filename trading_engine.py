@@ -747,10 +747,54 @@ def liquidate_order_manually(order_id):
     db.close_order(order_id, status="CLOSED_MANUAL", close_price=current_price, pnl=pnl)
     print(f"Order {order_id} manually liquidated at {current_price} with PnL {pnl:.2f}")
     
+    # Trigger post-trade learning logic (fine-tuning after every trade, bootstrap after 10 consecutive losses)
+    try:
+        user = db.get_settings()
+        tf = (dict(user).get("timeframe") or "1m") if user else "1m"
+        handle_post_trade_learning(pair, tf, pnl)
+    except Exception as e_learn:
+        print(f"Post trade learning trigger error: {e_learn}")
+
     # Отправляем уведомление
     pnl_emoji = "🟢" if pnl >= 0 else "🔴"
     send_notification(f"{pnl_emoji} <b>Ордер закрыт вручную</b>\n\nПара: {pair}\nТип: {side}\nВход: ${entry:,.4f}\nВыход: ${current_price:,.4f}\nPnL: ${pnl:,.2f}")
     return True
+
+def handle_post_trade_learning(pair, timeframe, pnl):
+    """
+    Автоматическое обучение после закрытия сделки:
+    1. После КАЖДОЙ закрытой сделки — адаптивное дообучение (RL Fine-tuning).
+    2. Если 10 сделок подряд убыточные — запуск полного переобучения с нуля (Bootstrap).
+    3. Иначе при убытке — быстрое переобучение на накопленной истории рынка.
+    """
+    try:
+        pair_upper = pair.upper()
+        # 1. Адаптивное RL-дообучение после КАЖДОЙ закрытой сделки
+        try:
+            scalping_ensemble.adapt_models_to_closed_orders(pair_upper, timeframe)
+        except Exception as ex1:
+            print(f"Error in adapt_models_to_closed_orders: {ex1}")
+        
+        # 2. Проверяем 10 последних закрытых ордеров в БД для этой пары
+        recent_closed = db.get_recent_closed_orders(pair_upper, limit=10)
+        
+        is_10_losses = False
+        if len(recent_closed) >= 10:
+            is_10_losses = all(float(o.get("pnl", 0.0) or 0.0) < 0 for o in recent_closed)
+            
+        if is_10_losses:
+            print(f"[BOOTSTRAP RETRAIN ALERT] 10 consecutive loss-making trades detected on {pair_upper}! Triggering full retrain from scratch...")
+            send_notification(
+                f"⚠️ <b>[AI RETRAIN ALERT]</b>\n"
+                f"Обнаружена серия из <b>10 убыточных сделок подряд</b> на {pair_upper} ({timeframe})!\n"
+                f"🚀 Запуск полного переобучения модели с нуля (Bootstrap)..."
+            )
+            scalping_ensemble.bootstrap_virtual_training(pair_upper, timeframe)
+        elif pnl < 0:
+            print(f"[LOSS RETRAIN] Position closed in loss (PnL: {pnl:.2f}). Triggering market history retrain to adapt.")
+            scalping_ensemble.retrain_on_market_history(pair_upper, timeframe)
+    except Exception as ex:
+        print(f"Error in handle_post_trade_learning: {ex}")
 
 
 # =====================================================================
@@ -1340,13 +1384,8 @@ def evaluate_market_signal(persist_log=False, place_order=False):
                     except Exception as db_ex:
                         print(f"Error cancelling local pending order alongside active position: {db_ex}")
 
-                # Check if closed in loss
-                if pnl < 0:
-                    print(f"[LOSS RETRAIN] Position closed in loss due to AI signal switch (PnL: {pnl}). Triggering retraining to adapt.")
-                    try:
-                        scalping_ensemble.retrain_on_market_history(pair, timeframe)
-                    except Exception as re:
-                        print(f"Error retraining models after AI exit loss: {re}")
+                # Trigger post-trade learning logic
+                handle_post_trade_learning(pair, timeframe, pnl)
 
                 pnl_sign = "+" if pnl >= 0 else ""
                 send_notification(
@@ -1731,15 +1770,13 @@ def run_market_simulator():
                                 f"Профит/Убыток: <b>{pnl_sign}${pnl:,.2f}</b>"
                             )
 
-                    # Check if closed in loss
-                    if pnl < 0:
-                        print(f"[LOSS RETRAIN] Position closed in loss (PnL: {pnl}). Triggering retraining to adapt.")
-                        try:
-                            settings = db.get_settings()
-                            tf = (dict(settings).get("timeframe") or "3m") if settings else "3m"
-                            scalping_ensemble.retrain_on_market_history(pair, tf)
-                        except Exception as re:
-                            print(f"Error retraining models after losing trade: {re}")
+                    # Trigger post-trade learning logic
+                    try:
+                        settings = db.get_settings()
+                        tf = (dict(settings).get("timeframe") or "1m") if settings else "1m"
+                        handle_post_trade_learning(pair, tf, pnl)
+                    except Exception as re:
+                        print(f"Error in post-trade learning after order close: {re}")
                         
             time.sleep(0.5)  # проверяем чаще для 1-минутного таймфрейма
             
