@@ -41,7 +41,7 @@ def build_models_view(page: ft.Page, lang: str):
     def refresh_models_list():
         page.run_task(async_refresh_models_list, None)
 
-    async def async_refresh_models_list():
+    async def async_refresh_models_list(*args):
         if not models_grid.controls:
             models_grid.controls.append(
                 ft.Container(
