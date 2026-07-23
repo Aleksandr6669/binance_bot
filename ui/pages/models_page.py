@@ -347,11 +347,17 @@ def build_models_view(page: ft.Page, lang: str):
         border=ft.Border.all(1, ft.Colors.with_opacity(0.12, "#ffffff"))
     )
 
-    fixed_header = ft.Column([
-        top_bar,
-        active_info_banner,
-        ft.Divider(color=ft.Colors.with_opacity(0.08, "#ffffff"), height=10),
-    ], spacing=10)
+    fixed_header = ft.Container(
+        content=ft.Column([
+            top_bar,
+            active_info_banner,
+        ], spacing=12),
+        bgcolor=COLOR_GLASS_BG,
+        blur=DEFAULT_BLUR,
+        padding=16,
+        border_radius=12,
+        border=ft.Border.all(1, ft.Colors.with_opacity(0.12, "#ffffff"))
+    )
 
     # Scrollable area containing ONLY the models grid
     scrollable_content = ft.Column([

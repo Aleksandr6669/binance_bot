@@ -216,7 +216,7 @@ def _wrap_content(content_control, route):
     return ft.Container(
         content=ft.Column(
             [content_control],
-            scroll=None if route in ["/history", "/decisions"] else ft.ScrollMode.AUTO,
+            scroll=None if route in ["/history", "/decisions", "/models"] else ft.ScrollMode.AUTO,
             expand=True,
         ),
         expand=True,
