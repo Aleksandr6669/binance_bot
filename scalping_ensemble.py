@@ -426,6 +426,11 @@ def load_models_from_disk(pair, timeframe):
         except Exception as db_ex:
             logger.warning(f"Ошибка импорта сопутствующей истории из pkl в БД: {db_ex}")
             
+        # Если подключен LightGBM, но из pkl загрузился старый NumPyClassifier — автоматически обновляем до LightGBM
+        if HAS_LIGHTGBM and isinstance(classifier_model, NumPyClassifier):
+            logger.info(f"Обнаружен устаревший NumPyClassifier для {pair} ({timeframe}) при активном LightGBM. Автоматически обновляем модель до LightGBM...")
+            retrain_on_market_history(pair, timeframe)
+
         logger.info(f"Модели для {pair} ({timeframe}) успешно загружены с диска!")
         return True
     except Exception as e:
