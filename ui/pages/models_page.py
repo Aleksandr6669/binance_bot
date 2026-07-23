@@ -47,8 +47,9 @@ def build_models_view(page: ft.Page, lang: str):
         if st and st.get("active"):
             st_key = f"{st['pair']}_{st['timeframe']}"
             active_tasks[st_key] = st.get("msg", f"Обучение нейросети {st['pair']} ({st['timeframe']})...")
-        else:
-            active_tasks.clear()
+        elif st and not st.get("active") and st.get("pair") and st.get("timeframe"):
+            st_key = f"{st['pair']}_{st['timeframe']}"
+            active_tasks.pop(st_key, None)
 
         # Inject placeholder entries for models currently training that are not on disk yet
         for task_key, task_msg in list(active_tasks.items()):
