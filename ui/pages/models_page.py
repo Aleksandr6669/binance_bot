@@ -224,17 +224,19 @@ def build_models_view(page: ft.Page, lang: str):
                         ),
                         on_click=make_finetune_handler(pair, tf)
                     ),
-                    ft.Container(
-                        content=ft.IconButton(
-                            icon=ft.Icons.DELETE_OUTLINED,
-                            icon_color=RED_COLOR,
-                            icon_size=16,
-                            tooltip=t_delete,
-                            on_click=make_delete_handler(pair, tf)
+                    ft.OutlinedButton(
+                        content=ft.Row([
+                            ft.Icon(ft.Icons.DELETE_OUTLINED, size=13, color=RED_COLOR),
+                            ft.Text(t_delete, size=11, color=RED_COLOR, weight=ft.FontWeight.BOLD)
+                        ], spacing=4),
+                        tooltip=t_delete,
+                        style=ft.ButtonStyle(
+                            side=ft.BorderSide(1, ft.Colors.with_opacity(0.6, RED_COLOR)),
+                            bgcolor=ft.Colors.with_opacity(0.08, RED_COLOR),
+                            shape=ft.RoundedRectangleBorder(radius=6),
+                            padding=ft.Padding.symmetric(vertical=5, horizontal=10)
                         ),
-                        bgcolor=ft.Colors.with_opacity(0.08, RED_COLOR),
-                        border_radius=6,
-                        border=ft.Border.all(1, ft.Colors.with_opacity(0.2, RED_COLOR))
+                        on_click=make_delete_handler(pair, tf)
                     )
                 ], alignment=ft.MainAxisAlignment.END, spacing=6)
 
@@ -334,6 +336,7 @@ def build_models_view(page: ft.Page, lang: str):
                 blur=ft.Blur(10, 10, ft.BlurTileMode.MIRROR),
                 padding=ft.Padding(14, 10, 14, 10),
                 border_radius=10,
+                height=220,
                 border=ft.Border.all(
                     1.5 if is_active else 1,
                     GOLD_COLOR if is_active else ft.Colors.with_opacity(0.1, "#ffffff")
