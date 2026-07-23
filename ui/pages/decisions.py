@@ -442,7 +442,7 @@ def build_decisions_view(page: ft.Page, lang: str):
         color="#f8fafc",
         border_color=ft.Colors.with_opacity(0.3, "#ffffff"),
         border_radius=8,
-        bgcolor=COLOR_BG,
+        bgcolor=BG_COLOR,
         content_padding=ft.Padding(6, 0, 6, 0)
     )
 
