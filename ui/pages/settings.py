@@ -553,6 +553,7 @@ def build_settings_view(page: ft.Page, lang: str):
         ("3.0", "3.0% (Широкий диапазон)" if lang == "ru" else "3.0% (Wide)"),
     ]
 
+    is_limit_active = (settings.get("use_limit_orders", 1) == 1)
     is_ai_limit_active = (settings.get("use_ai_limit_price", 0) == 1)
     if is_ai_limit_active:
         curr_limit_offset_str = "ai"
@@ -567,7 +568,8 @@ def build_settings_view(page: ft.Page, lang: str):
         label=t("limit_offset_label", lang),
         options=[ft.dropdown.Option(k, v) for k, v in limit_offset_options],
         value=curr_limit_offset_str,
-        on_change=trigger_autosave_instant
+        on_change=trigger_autosave_instant,
+        disabled=not is_limit_active
     )
     
     # Segment toggles for Fixed vs Percent size
@@ -766,10 +768,11 @@ def build_settings_view(page: ft.Page, lang: str):
     invert_signal_sw = ft.Switch(value=settings.get("invert_signal", 0) == 1, on_change=trigger_autosave_instant)
     # Limit order components
     def on_limit_change(e):
+        is_active = use_limit_sw.value
+        limit_offset_dd.disabled = not is_active
         page.update()
         trigger_autosave_instant()
 
-    is_limit_active = (settings.get("use_limit_orders", 1) == 1)
     use_limit_sw = ft.Switch(value=is_limit_active, on_change=on_limit_change)
     use_ai_limit_sw = ft.Switch(value=settings.get("use_ai_limit_price", 0) == 1, on_change=trigger_autosave_instant)
     use_ai_exit_sw = ft.Switch(value=settings.get("use_ai_exit", 0) == 1, on_change=trigger_autosave_instant)
