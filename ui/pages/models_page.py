@@ -22,21 +22,21 @@ def build_models_view(page: ft.Page, lang: str):
     
     t_btn_create = {"en": "Train New Model", "ru": "Обучить новую модель", "uk": "Навчити нову модель"}.get(lang, "Train New Model")
     t_btn_refresh = {"en": "Refresh", "ru": "Обновить список", "uk": "Оновити список"}.get(lang, "Refresh")
-    t_retrain = {"en": "Retrain", "ru": "Переобучить с нуля", "uk": "Перенавчити з нуля"}.get(lang, "Retrain")
+    t_retrain = {"en": "Retrain from scratch", "ru": "Переобучить с нуля", "uk": "Перенавчити з нуля"}.get(lang, "Retrain")
     t_finetune = {"en": "Fine-tune (RL)", "ru": "Дообучить (RL)", "uk": "Донавчити (RL)"}.get(lang, "Fine-tune")
     t_delete = {"en": "Delete", "ru": "Удалить", "uk": "Видалити"}.get(lang, "Delete")
     t_no_models = {"en": "No trained model files found in models/ directory.", "ru": "Обученные модели не найдены в папке models/.", "uk": "Навчені моделі не знайдені в папці models/."}.get(lang, "")
 
-    models_grid = ft.ResponsiveRow(spacing=15)
-    loading_container = ft.Container(visible=False)
-    loading_text = ft.Text("", size=13, color="#e2e8f0", weight=ft.FontWeight.W_500)
+    models_grid = ft.ResponsiveRow(spacing=16)
+    loading_text = ft.Text("", size=13, color="#f8fafc", weight=ft.FontWeight.W_500)
 
     loading_overlay = ft.Container(
         content=ft.Column([
             ft.ProgressRing(color=GOLD_COLOR, width=48, height=48),
             loading_text
         ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, alignment=ft.MainAxisAlignment.CENTER, spacing=15),
-        bgcolor=ft.Colors.with_opacity(0.85, "#030407"),
+        bgcolor=ft.Colors.with_opacity(0.88, "#030407"),
+        blur=DEFAULT_BLUR,
         padding=30,
         border_radius=12,
         alignment=ft.alignment.Alignment(0, 0),
@@ -89,13 +89,17 @@ def build_models_view(page: ft.Page, lang: str):
             
             is_lgbm = "LightGBM" in m["classifier_type"]
             clf_badge_color = "#10b981" if is_lgbm else "#f59e0b"
-            
+            clf_label_text = "🟢 LightGBM (Gradient Boosting)" if is_lgbm else "⚡ NumPy Classifier (Fallback)"
+
             active_badge = ft.Container(
-                content=ft.Text("🟢 " + ("АКТИВНА" if lang == "ru" else "ACTIVE"), size=10, weight=ft.FontWeight.BOLD, color="#10b981"),
-                padding=ft.Padding.symmetric(vertical=2, horizontal=6),
-                border_radius=4,
+                content=ft.Row([
+                    ft.Icon(ft.Icons.CHECK_CIRCLE_ROUNDED, size=12, color="#10b981"),
+                    ft.Text("АКТИВНАЯ МОДЕЛЬ (ТОРГУЕТ СЕЙЧАС)" if lang == "ru" else "ACTIVE MODEL", size=10, weight=ft.FontWeight.BOLD, color="#10b981")
+                ], spacing=4, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                padding=ft.Padding.symmetric(vertical=3, horizontal=8),
+                border_radius=6,
                 bgcolor=ft.Colors.with_opacity(0.12, "#10b981"),
-                border=ft.Border.all(1, ft.Colors.with_opacity(0.3, "#10b981")),
+                border=ft.Border.all(1, ft.Colors.with_opacity(0.35, "#10b981")),
                 visible=is_active
             )
 
@@ -139,101 +143,98 @@ def build_models_view(page: ft.Page, lang: str):
                     refresh_models_list()
                 return delete_action
 
+            # Styled metric box builder
+            def make_metric_box(icon, label, value, value_color="#f8fafc", col_span=3):
+                return ft.Container(
+                    content=ft.Column([
+                        ft.Row([
+                            ft.Icon(icon, size=13, color=value_color),
+                            ft.Text(label, size=11, color="#94a3b8", weight=ft.FontWeight.W_500)
+                        ], spacing=4, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                        ft.Text(value, size=14, weight=ft.FontWeight.BOLD, color=value_color)
+                    ], spacing=3),
+                    padding=12,
+                    border_radius=8,
+                    bgcolor=ft.Colors.with_opacity(0.04, "#ffffff"),
+                    border=ft.Border.all(1, ft.Colors.with_opacity(0.06, "#ffffff")),
+                    col={"xs": 6, "md": col_span}
+                )
+
             card = ft.Container(
                 content=ft.Column([
                     # Header row
                     ft.Row([
                         ft.Row([
-                            ft.Icon(ft.Icons.MEMORY_ROUNDED, size=20, color=GOLD_COLOR),
-                            ft.Text(f"{pair} ({tf})", size=16, weight=ft.FontWeight.BOLD, color="#f8fafc"),
+                            ft.Icon(ft.Icons.MEMORY_ROUNDED, size=22, color=GOLD_COLOR if is_active else "#94a3b8"),
+                            ft.Text(f"{pair} ({tf})", size=17, weight=ft.FontWeight.BOLD, color="#f8fafc"),
                             active_badge
-                        ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                        ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER),
                         ft.Container(
-                            content=ft.Text(m["classifier_type"], size=10, weight=ft.FontWeight.W_600, color=clf_badge_color),
-                            padding=ft.Padding.symmetric(vertical=3, horizontal=8),
+                            content=ft.Text(clf_label_text, size=11, weight=ft.FontWeight.W_600, color=clf_badge_color),
+                            padding=ft.Padding.symmetric(vertical=4, horizontal=10),
                             border_radius=6,
-                            bgcolor=ft.Colors.with_opacity(0.1, clf_badge_color),
+                            bgcolor=ft.Colors.with_opacity(0.12, clf_badge_color),
                             border=ft.Border.all(1, ft.Colors.with_opacity(0.3, clf_badge_color))
                         )
                     ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER),
 
-                    ft.Divider(color=ft.Colors.with_opacity(0.1, "#ffffff"), height=15),
+                    ft.Divider(color=ft.Colors.with_opacity(0.08, "#ffffff"), height=16),
 
                     # Metrics Grid
                     ft.ResponsiveRow([
-                        # MSE Loss Metric
-                        ft.Container(
-                            content=ft.Column([
-                                ft.Row([
-                                    ft.Icon(ft.Icons.ANALYTICS_OUTLINED, size=13, color="#38bdf8"),
-                                    ft.Text("Ошибка DLinear (Loss):" if lang == "ru" else "DLinear Error (Loss):", size=11, color="#94a3b8")
-                                ], spacing=4),
-                                ft.Text(loss_str, size=15, weight=ft.FontWeight.BOLD, color="#38bdf8")
-                            ], spacing=2),
-                            col={"xs": 6, "md": 3}
-                        ),
-                        # Candles count
-                        ft.Container(
-                            content=ft.Column([
-                                ft.Row([
-                                    ft.Icon(ft.Icons.CANDLESTICK_CHART, size=13, color=GOLD_COLOR),
-                                    ft.Text("Свечей обучения:" if lang == "ru" else "Trained Candles:", size=11, color="#94a3b8")
-                                ], spacing=4),
-                                ft.Text(f"{m['candles_count']:,}", size=14, weight=ft.FontWeight.BOLD, color="#f8fafc")
-                            ], spacing=2),
-                            col={"xs": 6, "md": 3}
-                        ),
-                        # RL Feedback samples
-                        ft.Container(
-                            content=ft.Column([
-                                ft.Row([
-                                    ft.Icon(ft.Icons.PSYCHOLOGY_ALT, size=13, color="#a78bfa"),
-                                    ft.Text("RL Сэмплов:" if lang == "ru" else "RL Samples:", size=11, color="#94a3b8")
-                                ], spacing=4),
-                                ft.Text(f"{m['feedback_count']}", size=14, weight=ft.FontWeight.BOLD, color="#a78bfa")
-                            ], spacing=2),
-                            col={"xs": 6, "md": 3}
-                        ),
-                        # File Size & Date
-                        ft.Container(
-                            content=ft.Column([
-                                ft.Row([
-                                    ft.Icon(ft.Icons.SCHEDULE, size=13, color="#64748b"),
-                                    ft.Text("Обновлено / Размер:" if lang == "ru" else "Updated / Size:", size=11, color="#94a3b8")
-                                ], spacing=4),
-                                ft.Text(f"{m['mtime']} ({m['size_mb']} MB)", size=11, color="#e2e8f0", weight=ft.FontWeight.W_500)
-                            ], spacing=2),
-                            col={"xs": 6, "md": 3}
-                        ),
+                        make_metric_box(ft.Icons.ANALYTICS_OUTLINED, "Ошибка DLinear (Loss):" if lang == "ru" else "DLinear Error (Loss):", loss_str, value_color="#38bdf8", col_span=3),
+                        make_metric_box(ft.Icons.CANDLESTICK_CHART, "Свечей обучения:" if lang == "ru" else "Trained Candles:", f"{m['candles_count']:,}", value_color=GOLD_COLOR, col_span=3),
+                        make_metric_box(ft.Icons.PSYCHOLOGY_ALT, "RL Сэмплов:" if lang == "ru" else "RL Samples:", f"{m['feedback_count']}", value_color="#a78bfa", col_span=3),
+                        make_metric_box(ft.Icons.SCHEDULE, "Обновлено / Размер:" if lang == "ru" else "Updated / Size:", f"{m['mtime']} ({m['size_mb']} MB)", value_color="#cbd5e1", col_span=3),
                     ], spacing=10),
 
-                    ft.Divider(color=ft.Colors.with_opacity(0.1, "#ffffff"), height=15),
+                    ft.Divider(color=ft.Colors.with_opacity(0.08, "#ffffff"), height=16),
 
-                    # Action buttons
+                    # Action buttons row
                     ft.Row([
                         ft.ElevatedButton(
-                            content=ft.Row([ft.Icon(ft.Icons.AUTORENEW_ROUNDED, size=14, color="#030407"), ft.Text(t_retrain, size=12, color="#030407", weight=ft.FontWeight.BOLD)], spacing=4),
-                            style=ft.ButtonStyle(bgcolor=GOLD_COLOR, shape=ft.RoundedRectangleBorder(radius=6), padding=ft.Padding.symmetric(vertical=8, horizontal=12)),
+                            content=ft.Row([
+                                ft.Icon(ft.Icons.AUTORENEW_ROUNDED, size=15, color="#030407"),
+                                ft.Text(t_retrain, size=12, color="#030407", weight=ft.FontWeight.BOLD)
+                            ], spacing=6),
+                            style=ft.ButtonStyle(
+                                bgcolor=GOLD_COLOR,
+                                shape=ft.RoundedRectangleBorder(radius=8),
+                                padding=ft.Padding.symmetric(vertical=10, horizontal=14)
+                            ),
                             on_click=make_retrain_handler(pair, tf)
                         ),
                         ft.OutlinedButton(
-                            content=ft.Row([ft.Icon(ft.Icons.FLASH_ON_ROUNDED, size=14, color="#a78bfa"), ft.Text(t_finetune, size=12, color="#a78bfa", weight=ft.FontWeight.BOLD)], spacing=4),
-                            style=ft.ButtonStyle(side=ft.BorderSide(1, "#a78bfa"), shape=ft.RoundedRectangleBorder(radius=6), padding=ft.Padding.symmetric(vertical=8, horizontal=12)),
+                            content=ft.Row([
+                                ft.Icon(ft.Icons.FLASH_ON_ROUNDED, size=15, color="#a78bfa"),
+                                ft.Text(t_finetune, size=12, color="#a78bfa", weight=ft.FontWeight.BOLD)
+                            ], spacing=6),
+                            style=ft.ButtonStyle(
+                                side=ft.BorderSide(1, "#a78bfa"),
+                                shape=ft.RoundedRectangleBorder(radius=8),
+                                padding=ft.Padding.symmetric(vertical=10, horizontal=14)
+                            ),
                             on_click=make_finetune_handler(pair, tf)
                         ),
-                        ft.IconButton(
-                            icon=ft.Icons.DELETE_OUTLINED,
-                            icon_color=RED_COLOR,
-                            icon_size=18,
-                            tooltip=t_delete,
-                            on_click=make_delete_handler(pair, tf)
+                        ft.Container(
+                            content=ft.IconButton(
+                                icon=ft.Icons.DELETE_OUTLINED,
+                                icon_color=RED_COLOR,
+                                icon_size=18,
+                                tooltip=t_delete,
+                                on_click=make_delete_handler(pair, tf)
+                            ),
+                            bgcolor=ft.Colors.with_opacity(0.08, RED_COLOR),
+                            border_radius=8,
+                            border=ft.Border.all(1, ft.Colors.with_opacity(0.2, RED_COLOR))
                         )
-                    ], alignment=ft.MainAxisAlignment.END, spacing=8)
+                    ], alignment=ft.MainAxisAlignment.END, spacing=10)
                 ]),
-                bgcolor=COLOR_GLASS_BG,
-                padding=18,
+                bgcolor=COLOR_GLASS_BG if not is_active else ft.Colors.with_opacity(0.08, "#ffffff"),
+                blur=DEFAULT_BLUR,
+                padding=20,
                 border_radius=12,
-                border=ft.Border.all(1, GOLD_COLOR if is_active else BORDER_COLOR),
+                border=ft.Border.all(1.5 if is_active else 1, GOLD_COLOR if is_active else ft.Colors.with_opacity(0.12, "#ffffff")),
                 col={"xs": 12}
             )
             models_grid.controls.append(card)
@@ -303,7 +304,7 @@ def build_models_view(page: ft.Page, lang: str):
             ft.TextButton("Отмена" if lang == "ru" else "Cancel", on_click=lambda e: setattr(create_dialog, "open", False) or page.update()),
             ft.ElevatedButton("🚀 Запустить обучение" if lang == "ru" else "🚀 Start Training", style=ft.ButtonStyle(bgcolor=GOLD_COLOR, color="#030407"), on_click=create_new_model_click)
         ],
-        bgcolor="#0f172a",
+        bgcolor="#0b0f19",
         shape=ft.RoundedRectangleBorder(radius=12)
     )
 
@@ -322,12 +323,12 @@ def build_models_view(page: ft.Page, lang: str):
         ft.Row([
             ft.OutlinedButton(
                 content=ft.Row([ft.Icon(ft.Icons.REFRESH, size=16, color=GOLD_COLOR), ft.Text(t_btn_refresh, size=12, color=GOLD_COLOR)], spacing=4),
-                style=ft.ButtonStyle(side=ft.BorderSide(1, GOLD_COLOR), shape=ft.RoundedRectangleBorder(radius=6)),
+                style=ft.ButtonStyle(side=ft.BorderSide(1, GOLD_COLOR), shape=ft.RoundedRectangleBorder(radius=8)),
                 on_click=lambda e: refresh_models_list()
             ),
             ft.ElevatedButton(
                 content=ft.Row([ft.Icon(ft.Icons.ADD_ROUNDED, size=16, color="#030407"), ft.Text(t_btn_create, size=12, color="#030407", weight=ft.FontWeight.BOLD)], spacing=4),
-                style=ft.ButtonStyle(bgcolor=GOLD_COLOR, shape=ft.RoundedRectangleBorder(radius=6)),
+                style=ft.ButtonStyle(bgcolor=GOLD_COLOR, shape=ft.RoundedRectangleBorder(radius=8)),
                 on_click=open_create_dialog
             )
         ], spacing=10)
@@ -340,15 +341,16 @@ def build_models_view(page: ft.Page, lang: str):
             ft.Text(f"Текущая работающая модель в терминале: {active_pair} ({active_tf})" if lang == "ru" else f"Active model running in engine: {active_pair} ({active_tf})", size=12, color="#e2e8f0", weight=ft.FontWeight.W_600)
         ], spacing=8),
         bgcolor=ft.Colors.with_opacity(0.06, "#ffffff"),
-        padding=ft.Padding.symmetric(vertical=10, horizontal=15),
+        blur=DEFAULT_BLUR,
+        padding=ft.Padding.symmetric(vertical=12, horizontal=16),
         border_radius=8,
-        border=ft.Border.all(1, ft.Colors.with_opacity(0.1, "#ffffff"))
+        border=ft.Border.all(1, ft.Colors.with_opacity(0.12, "#ffffff"))
     )
 
     main_column = ft.Column([
         top_bar,
         active_info_banner,
-        ft.Divider(color=ft.Colors.with_opacity(0.1, "#ffffff"), height=20),
+        ft.Divider(color=ft.Colors.with_opacity(0.08, "#ffffff"), height=20),
         loading_overlay,
         models_grid
     ], spacing=15)
