@@ -6,7 +6,7 @@ from ui.theme import *
 from ui.styles import *
 from ui.i18n import t
 from ui.layout import build_layout
-from ui.helpers import make_textfield
+from ui.helpers import make_textfield, make_dropdown
 
 def to_local_time(ts_str, tz_offset_min=None):
     if not ts_str:
