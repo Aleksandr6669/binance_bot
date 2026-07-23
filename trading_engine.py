@@ -1047,13 +1047,14 @@ def run_user_scalping_cycle():
             reason = f"Сигнал на покупку! Вероятность {prob:.4f} > {threshold:.2f}. Фильтр волатильности в норме."
             
         indicators_str = f"RSI: {current_rsi_norm*100:.1f}, ATR%: {current_atr_pct*100:.4f}%, OBI: {current_obi:.3f}, CVD: {current_cvd:.2f}"
-        stage1_out = f"1-Minute Scalping Analysis.\nVolatility Filter: {'BLOCKED' if vol_blocked else 'OK'}\nHourly Average ATR: {mean_hourly_atr:.4f}\nCurrent ATR: {current_atr:.4f}"
+        stage1_out = f"{timeframe} Scalping Analysis.\nVolatility Filter: {'BLOCKED' if vol_blocked else 'OK'}\nHourly Average ATR: {mean_hourly_atr:.4f}\nCurrent ATR: {current_atr:.4f}"
         stage2_out = f"DLinear Predictions:\n- t+1 Close Change: {pred_change_1m*100:+.4f}%\n- t+2 Close Change: {pred_change_2m*100:+.4f}%\n\nClassifier Success Probability: {prob*100:.2f}%"
         stage3_out = json.dumps({
             "action": "BUY" if action == "BUY" else "HOLD",
             "price": current_close,
             "probability": prob,
-            "reason": reason
+            "reason": reason,
+            "timeframe": timeframe
         }, indent=2, ensure_ascii=False)
         
         # Persist analysis log with dedup/timestamp guard to avoid DB spam
@@ -1291,7 +1292,8 @@ def evaluate_market_signal(persist_log=False, place_order=False):
             "probability": prob,
             "reason": reason,
             "reason2": reason2,
-            "order_type": order_type_desc
+            "order_type": order_type_desc,
+            "timeframe": timeframe
         }, indent=2, ensure_ascii=False)
 
         if persist_log:

@@ -21,6 +21,29 @@ def to_local_time(ts_str, tz_offset_min=None):
     except Exception:
         return str(ts_str)
 
+def extract_log_timeframe(log):
+    if not isinstance(log, dict):
+        return "1m"
+        
+    s3 = log.get("stage3_output")
+    if isinstance(s3, str) and "timeframe" in s3:
+        try:
+            parsed = json.loads(s3)
+            if isinstance(parsed, dict) and parsed.get("timeframe"):
+                return str(parsed["timeframe"])
+        except Exception:
+            pass
+
+    s1 = str(log.get("stage1_output") or "")
+    if " Scalping" in s1:
+        parts = s1.split(" Scalping")[0].strip().split()
+        if parts:
+            candidate = parts[-1]
+            if candidate in ["1m", "3m", "5m", "15m", "30m", "1h", "4h", "1d"]:
+                return candidate
+
+    return "1m"
+
 def build_decisions_view(page: ft.Page, lang: str):
     tz_offset = getattr(page, "tz_offset", None) or db.get_host_tz_offset_min()
     page.tz_offset = tz_offset
@@ -73,9 +96,10 @@ def build_decisions_view(page: ft.Page, lang: str):
         expand=True
     )
 
-    # Filter state — single date (today by default in user's local timezone)
+    # Filter state — pair search, timeframe, and single date
     filter_state = {
         "pair": "",
+        "tf": "ALL",
         "date": today_str,
     }
 
@@ -169,6 +193,15 @@ def build_decisions_view(page: ft.Page, lang: str):
                 action = s3.get("action", "HOLD")
                 prob = s3.get("probability", 0.0)
                 action_color = "#38bdf8" if action == "HOLD" else ("#10b981" if "BUY" in action else "#ef4444")
+                log_tf = extract_log_timeframe(log)
+
+                tf_pill = ft.Container(
+                    content=ft.Text(log_tf, size=9, weight=ft.FontWeight.BOLD, color=GOLD_COLOR),
+                    padding=ft.Padding.symmetric(vertical=2, horizontal=5),
+                    border_radius=4,
+                    bgcolor=ft.Colors.with_opacity(0.12, GOLD_COLOR),
+                    border=ft.Border.all(1, ft.Colors.with_opacity(0.3, GOLD_COLOR))
+                )
 
                 def make_click_handler(lid):
                     return lambda _: select_log(lid)
@@ -176,9 +209,12 @@ def build_decisions_view(page: ft.Page, lang: str):
                 item_card = ft.Container(
                     content=ft.Column([
                         ft.Row([
-                            ft.Text(log['pair'], weight=ft.FontWeight.BOLD, size=12, color="#f8fafc", no_wrap=True),
+                            ft.Row([
+                                ft.Text(log['pair'], weight=ft.FontWeight.BOLD, size=12, color="#f8fafc", no_wrap=True),
+                                tf_pill
+                            ], spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER),
                             ft.Text(f"{action} ({prob*100:.1f}%)", color=action_color, weight=ft.FontWeight.BOLD, size=11, no_wrap=True),
-                        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER),
                         ft.Row([
                             ft.Icon(ft.Icons.ACCESS_TIME_ROUNDED, size=11, color="#64748b"),
                             ft.Text(to_local_time(log['created_at'], tz_offset), size=10, color="#64748b")
@@ -245,11 +281,21 @@ def build_decisions_view(page: ft.Page, lang: str):
         action = s3.get("action", "HOLD")
         prob = s3.get("probability", 0.0)
         action_color = "#38bdf8" if action == "HOLD" else ("#10b981" if "BUY" in action else "#ef4444")
+        selected_tf = extract_log_timeframe(selected_log)
 
         header_card = create_glass_card(
             ft.Row([
                 ft.Column([
-                    ft.Text(selected_log["pair"], size=22, weight=ft.FontWeight.BOLD, color="#f8fafc"),
+                    ft.Row([
+                        ft.Text(selected_log["pair"], size=22, weight=ft.FontWeight.BOLD, color="#f8fafc"),
+                        ft.Container(
+                            content=ft.Text(selected_tf, size=11, weight=ft.FontWeight.BOLD, color=GOLD_COLOR),
+                            padding=ft.Padding.symmetric(vertical=3, horizontal=8),
+                            border_radius=6,
+                            bgcolor=ft.Colors.with_opacity(0.12, GOLD_COLOR),
+                            border=ft.Border.all(1, ft.Colors.with_opacity(0.3, GOLD_COLOR))
+                        )
+                    ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
                     ft.Text(t("log_created", lang, time=to_local_time(selected_log['created_at'], tz_offset)), size=12, color="#64748b")
                 ], spacing=4),
                 ft.Column([
@@ -346,9 +392,13 @@ def build_decisions_view(page: ft.Page, lang: str):
         logs = await asyncio.to_thread(db.get_filtered_analysis_logs, pair=None, date=filter_state["date"] or None, tz_offset_min=tz_offset)
         
         pair_query = (filter_state["pair"] or "").strip().upper()
+        selected_tf = filter_state.get("tf", "ALL")
         filtered_logs = []
         for log in (logs or []):
             if pair_query and pair_query not in (log.get("pair") or "").upper():
+                continue
+            tf_val = extract_log_timeframe(log)
+            if selected_tf != "ALL" and tf_val != selected_tf:
                 continue
             # Display all decisions, including neutral (HOLD) signals
             filtered_logs.append(log)
@@ -375,6 +425,32 @@ def build_decisions_view(page: ft.Page, lang: str):
         run_apply()
 
     pair_field.on_change = on_pair_change
+
+    # ---------- Timeframe Filter Dropdown ----------
+    tf_dropdown = ft.Dropdown(
+        options=[
+            ft.dropdown.Option("ALL", "Все TF" if lang == "ru" else "All TF"),
+            ft.dropdown.Option("1m", "1m"),
+            ft.dropdown.Option("3m", "3m"),
+            ft.dropdown.Option("5m", "5m"),
+            ft.dropdown.Option("15m", "15m"),
+        ],
+        value="ALL",
+        width=84,
+        height=48,
+        text_size=10,
+        color="#f8fafc",
+        border_color=ft.Colors.with_opacity(0.3, "#ffffff"),
+        border_radius=8,
+        bgcolor=COLOR_BG,
+        content_padding=ft.Padding(6, 0, 6, 0)
+    )
+
+    def on_tf_change(e):
+        filter_state["tf"] = tf_dropdown.value or "ALL"
+        run_apply()
+
+    tf_dropdown.on_change = on_tf_change
 
     # ---------- Single date picker ----------
     date_text = ft.Text(filter_state["date"], size=10, color="#f8fafc")
@@ -426,9 +502,11 @@ def build_decisions_view(page: ft.Page, lang: str):
         ft.Row([
             pair_field,
             ft.Container(width=1, height=16, bgcolor="#334155"),
+            tf_dropdown,
+            ft.Container(width=1, height=16, bgcolor="#334155"),
             date_container,
-        ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
-        padding=10
+        ], spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+        padding=8
     )
 
     # ---------- Left panel ----------
@@ -480,9 +558,13 @@ def build_decisions_view(page: ft.Page, lang: str):
                     continue
 
                 pair_query = (filter_state["pair"] or "").strip().upper()
+                selected_tf = filter_state.get("tf", "ALL")
                 filtered_logs = []
                 for log in (logs or []):
                     if pair_query and pair_query not in (log.get("pair") or "").upper():
+                        continue
+                    tf_val = extract_log_timeframe(log)
+                    if selected_tf != "ALL" and tf_val != selected_tf:
                         continue
                     filtered_logs.append(log)
 
@@ -500,6 +582,15 @@ def build_decisions_view(page: ft.Page, lang: str):
                         act = action_s3.get("action", "HOLD")
                         prb = action_s3.get("probability", 0.0)
                         act_color = "#38bdf8" if act == "HOLD" else ("#10b981" if "BUY" in act else "#ef4444")
+                        log_tf = extract_log_timeframe(log)
+
+                        tf_pill = ft.Container(
+                            content=ft.Text(log_tf, size=9, weight=ft.FontWeight.BOLD, color=GOLD_COLOR),
+                            padding=ft.Padding.symmetric(vertical=2, horizontal=5),
+                            border_radius=4,
+                            bgcolor=ft.Colors.with_opacity(0.12, GOLD_COLOR),
+                            border=ft.Border.all(1, ft.Colors.with_opacity(0.3, GOLD_COLOR))
+                        )
                         
                         def make_click_handler(lid):
                             return lambda _: select_log(lid)
@@ -508,9 +599,12 @@ def build_decisions_view(page: ft.Page, lang: str):
                         card = ft.Container(
                             content=ft.Column([
                                 ft.Row([
-                                    ft.Text(log['pair'], weight=ft.FontWeight.BOLD, size=12, color="#f8fafc"),
+                                    ft.Row([
+                                        ft.Text(log['pair'], weight=ft.FontWeight.BOLD, size=12, color="#f8fafc"),
+                                        tf_pill
+                                    ], spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER),
                                     ft.Text(f"{act} ({prb*100:.1f}%)", color=act_color, weight=ft.FontWeight.BOLD, size=11, no_wrap=True),
-                                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER),
                                 ft.Row([
                                     ft.Icon(ft.Icons.ACCESS_TIME_ROUNDED, size=11, color="#64748b"),
                                     ft.Text(to_local_time(log['created_at'], tz_offset), size=10, color="#64748b")
