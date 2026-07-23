@@ -39,11 +39,29 @@ def build_models_view(page: ft.Page, lang: str):
             pass
 
     def refresh_models_list():
-        models_grid.controls.clear()
-        models = scalping_ensemble.get_models_metadata_list()
+        page.run_task(async_refresh_models_list, None)
 
-        # Sync active background training tasks from scalping_ensemble engine
-        st = scalping_ensemble.get_training_status()
+    async def async_refresh_models_list():
+        if not models_grid.controls:
+            models_grid.controls.append(
+                ft.Container(
+                    content=ft.Row([
+                        ft.ProgressRing(color=GOLD_COLOR, width=20, height=20, stroke_width=2.5),
+                        ft.Text("Загрузка списка нейросетей...", color="#94a3b8", size=13)
+                    ], spacing=10, alignment=ft.MainAxisAlignment.CENTER),
+                    padding=40,
+                    col={"xs": 12}
+                )
+            )
+            try:
+                page.update()
+            except Exception:
+                pass
+
+        models = await asyncio.to_thread(scalping_ensemble.get_models_metadata_list)
+        st = await asyncio.to_thread(scalping_ensemble.get_training_status)
+
+        models_grid.controls.clear()
         if st and st.get("active"):
             st_key = f"{st['pair']}_{st['timeframe']}"
             active_tasks[st_key] = st.get("msg", f"Обучение нейросети {st['pair']} ({st['timeframe']})...")
