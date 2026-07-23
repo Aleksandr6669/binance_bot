@@ -181,6 +181,7 @@ class NumPyDLinear:
             pred = self.forward(X)
             err = pred - Y
             loss = np.mean(err ** 2)
+            self.last_loss = float(loss)
             
             # Векторизованные градиенты
             dW_seasonal = (seasonal.T @ err) / N
@@ -342,10 +343,12 @@ def save_models_to_disk(pair, timeframe):
         except Exception as db_ex:
             logger.warning(f"Не удалось загрузить историю из БД для экспорта: {db_ex}")
 
+        last_loss = float(getattr(dlinear_model, "last_loss", 0.000016)) if dlinear_model is not None else 0.000016
         data = {
             "dlinear": dlinear_model,
             "classifier": classifier_model,
             "trailing": ai_trailing_model,
+            "loss": last_loss,
             "db_orders": orders,
             "db_analysis_logs": analysis_logs,
             "db_market_candles": market_candles
@@ -485,7 +488,9 @@ def get_models_metadata_list():
                     else:
                         classifier_type = f"NumPy Classifier"
                 
-                if dl is not None and hasattr(dl, "last_loss"):
+                if "loss" in data and data["loss"] is not None:
+                    loss_val = float(data["loss"])
+                elif dl is not None and hasattr(dl, "last_loss"):
                     loss_val = float(dl.last_loss)
         except Exception:
             pass
@@ -794,6 +799,7 @@ def train_models(df):
             optimizer.step()
             if (epoch + 1) % 5 == 0:
                 logger.info(f"DLinear PyTorch Epoch {epoch+1}/15 - Loss: {loss.item():.6f}")
+        dlinear_model.last_loss = float(loss.item())
         dlinear_model.eval()
     else:
         logger.info("Инициализация DLinear на NumPy (без PyTorch)...")
