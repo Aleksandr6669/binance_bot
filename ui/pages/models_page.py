@@ -33,7 +33,7 @@ def build_models_view(page: ft.Page, lang: str):
 
     loading_overlay = ft.Container(
         content=ft.Column([
-            ft.ProgressRing(color=GOLD_COLOR, size=48),
+            ft.ProgressRing(color=GOLD_COLOR, width=48, height=48),
             loading_text
         ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, alignment=ft.MainAxisAlignment.CENTER, spacing=15),
         bgcolor=ft.Colors.with_opacity(0.85, "#030407"),
