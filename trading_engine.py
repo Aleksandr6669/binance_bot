@@ -1388,6 +1388,7 @@ def evaluate_market_signal(persist_log=False, place_order=False):
             order_msg = "Анализ завершен. Вход заблокирован высокой волатильностью."
         elif has_existing_pair:
             use_ai_exit = bool(settings_dict.get("use_ai_exit", 0))
+            ai_exit_mode = settings_dict.get("ai_exit_mode", "STAGNATION_AND_REVERSAL")
             use_ai_trailing = bool(settings_dict.get("use_ai_trailing", 0))
 
             should_ai_exit = False
@@ -1408,18 +1409,33 @@ def evaluate_market_signal(persist_log=False, place_order=False):
                 # 1. Прямой разворот тренда ИИ (BUY -> SELL или SELL -> BUY)
                 is_reversal = (action in ["BUY", "SELL"] and action != current_side and not vol_blocked and prob > threshold)
                 
-                # 2. ⏳ Выход по ЗАСТОЮ ИИ (если нет роста / движения цены в течение 3+ минут)
+                # Расчет адаптивного времени застоя (3 свечи выбранного таймфрейма: 1m -> 3мин, 15m -> 45мин, 1h -> 3ч)
+                tf_sec = 60
+                tf_lower = str(timeframe).lower().strip()
+                if tf_lower.endswith("m"):
+                    try: tf_sec = int(tf_lower[:-1]) * 60
+                    except: tf_sec = 60
+                elif tf_lower.endswith("h"):
+                    try: tf_sec = int(tf_lower[:-1]) * 3600
+                    except: tf_sec = 3600
+                elif tf_lower.endswith("d"):
+                    try: tf_sec = int(tf_lower[:-1]) * 86400
+                    except: tf_sec = 86400
+                stagnation_min_sec = tf_sec * 3
+
+                # 2. ⏳ Выход по ЗАСТОЮ ИИ (только если режим STAGNATION_AND_REVERSAL)
                 is_stagnation_exit = False
-                if order_age_sec >= 180: # Прошло 3 минуты
+                if ai_exit_mode == "STAGNATION_AND_REVERSAL" and order_age_sec >= stagnation_min_sec:
                     pnl_pct = (current_close - entry_price) / entry_price if current_side == "BUY" else (entry_price - current_close) / entry_price
-                    # Если с момента входа цена почти не выросла (|PnL| < 0.15%) или застряла во флэте
+                    # Если за 3 свечи цена почти не сдвинулась в плюс
                     if abs(pnl_pct) < 0.0015 or (pnl_pct < 0.0030 and pred_change_1m <= 0.0001):
                         is_stagnation_exit = True
-                        exit_reason_label = "застой цены ИИ (отсутствие роста 3+ мин)"
+                        st_candles = 3
+                        exit_reason_label = f"застой цены ИИ (отсутствие роста {st_candles} свечи / {int(stagnation_min_sec/60)} мин)"
 
-                # 3. 🤖 НЕЙРОСЕТЕВАЯ МОДЕЛЬ ВЫХОДА (NumPyAIExitModel при прогнозе просадки)
+                # 3. 🤖 НЕЙРОСЕТЕВАЯ МОДЕЛЬ ВЫХОДА (только при режиме STAGNATION_AND_REVERSAL)
                 is_neural_exit = False
-                if order_age_sec >= 60 and not is_stagnation_exit:
+                if ai_exit_mode == "STAGNATION_AND_REVERSAL" and order_age_sec >= (tf_sec * 0.5) and not is_stagnation_exit:
                     ai_exit_res = scalping_ensemble.evaluate_ai_exit_neural_decision(active_order, current_close, features)
                     if ai_exit_res.get("should_exit", False) and ai_exit_res.get("exit_prob", 0.0) >= 0.75:
                         is_neural_exit = True

@@ -236,7 +236,8 @@ def build_settings_view(page: ft.Page, lang: str):
                 1 if use_ai_trailing_sw.value else 0,
                 float(loss_limit_field.value or 0),
                 float(profit_target_field.value or 0),
-                float(limit_offset_dd.value if limit_offset_dd.value and limit_offset_dd.value != "ai" else 1.0)
+                float(limit_offset_dd.value if limit_offset_dd.value and limit_offset_dd.value != "ai" else 1.0),
+                ai_exit_mode_dd.value if ai_exit_mode_dd and ai_exit_mode_dd.value else "STAGNATION_AND_REVERSAL"
             )
             t_saved = t("settings_saved", lang)
             
@@ -781,6 +782,20 @@ def build_settings_view(page: ft.Page, lang: str):
         page.update()
         trigger_autosave_instant()
 
+    ai_exit_mode_dd = ft.Dropdown(
+        options=[
+            ft.dropdown.Option("REVERSAL_ONLY", "Только при развороте ИИ"),
+            ft.dropdown.Option("STAGNATION_AND_REVERSAL", "Разворот ИИ + Застой (3+ мин)"),
+        ],
+        value=settings.get("ai_exit_mode", "STAGNATION_AND_REVERSAL"),
+        width=210,
+        height=38,
+        text_size=11,
+        focused_color=PRIMARY_COLOR,
+        border_color=BORDER_COLOR,
+        on_change=trigger_autosave_instant
+    )
+
     use_limit_sw = ft.Switch(value=is_limit_active, on_change=on_limit_change)
     use_ai_limit_sw = ft.Switch(value=settings.get("use_ai_limit_price", 0) == 1, on_change=trigger_autosave_instant)
     use_ai_exit_sw = ft.Switch(value=settings.get("use_ai_exit", 0) == 1, on_change=trigger_autosave_instant)
@@ -848,12 +863,45 @@ def build_settings_view(page: ft.Page, lang: str):
             alignment=ft.alignment.Alignment(-1.0, 0.0)
         )
         
+    ai_exit_box = ft.Container(
+        content=ft.Row(
+            [
+                ft.Column(
+                    [
+                        ft.Text(t("ai_exit_title", lang), size=12, weight=ft.FontWeight.BOLD, color="#f8fafc"),
+                        ft.Text(t("ai_exit_desc", lang), size=11, color="#94a3b8")
+                    ],
+                    expand=True,
+                    alignment=ft.MainAxisAlignment.CENTER,
+                    spacing=4
+                ),
+                ft.Row(
+                    [
+                        ai_exit_mode_dd,
+                        use_ai_exit_sw
+                    ],
+                    spacing=10,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER
+                )
+            ],
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER
+        ),
+        bgcolor=ft.Colors.with_opacity(0.05, "#ffffff"),
+        padding=ft.Padding(15, 0, 15, 0),
+        border_radius=8,
+        border=ft.Border.all(1, ft.Colors.TRANSPARENT),
+        col={"xs": 12, "md": 6},
+        height=80,
+        alignment=ft.alignment.Alignment(-1.0, 0.0)
+    )
+
     switches_row = ft.ResponsiveRow(
         [
             make_switch_box(t("invert_signal_title", lang), invert_signal_sw, t("invert_signal_desc", lang)),
             make_switch_box(t("use_limit_orders_title", lang), use_limit_sw, t("use_limit_orders_desc", lang)),
             make_switch_box(t("ai_trade_range_title", lang), use_ai_limit_sw, t("ai_trade_range_desc", lang)),
-            make_switch_box(t("ai_exit_title", lang), use_ai_exit_sw, t("ai_exit_desc", lang))
+            ai_exit_box
         ],
         spacing=10
     )
