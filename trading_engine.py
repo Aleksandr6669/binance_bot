@@ -1439,8 +1439,8 @@ def evaluate_market_signal(persist_log=False, place_order=False):
                 is_stagnation_exit = False
                 if ai_exit_mode == "STAGNATION_AND_REVERSAL" and order_age_sec >= stagnation_min_sec and bot_uptime_sec >= stagnation_min_sec:
                     pnl_pct = (current_close - entry_price) / entry_price if current_side == "BUY" else (entry_price - current_close) / entry_price
-                    # Если за 3 свечи цена почти не сдвинулась в плюс
-                    if abs(pnl_pct) < 0.0015 or (pnl_pct < 0.0030 and pred_change_1m <= 0.0001):
+                    # Выход по застою активируется СТРОГО в плюсе или в ноле (PnL >= 0.0), никогда не закрывая в минус
+                    if pnl_pct >= 0.0 and (pnl_pct < 0.0015 or (pnl_pct < 0.0030 and pred_change_1m <= 0.0001)):
                         is_stagnation_exit = True
                         st_candles = 3
                         exit_reason_label = f"застой цены ИИ (отсутствие роста {st_candles} свечи / {int(stagnation_min_sec/60)} мин)"
