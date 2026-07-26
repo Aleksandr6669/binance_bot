@@ -251,6 +251,40 @@ def build_settings_view(page: ft.Page, lang: str):
             except Exception as ex:
                 print(f"Error triggering instant analysis cycle after autosave: {ex}")
 
+            # Если пара или таймфрейм изменились — проверяем наличие модели
+            # Если модели нет — автоматически запускаем обучение в фоне
+            if pair_changed or tf_changed:
+                try:
+                    import scalping_ensemble as _se
+                    import os as _os
+                    new_pair = pair_to_save.upper()
+                    new_tf = timeframe_dd.value or "1m"
+                    model_file = f"models/{new_pair}_{new_tf}.pkl"
+                    if not _os.path.exists(model_file):
+                        def _auto_train_settings(p=new_pair, tf=new_tf):
+                            try:
+                                print(f"[AUTO-TRAIN] Настройки изменены: нейросеть {p} ({tf}) не найдена. Запуск обучения...")
+                                _se.bootstrap_virtual_training(p, tf)
+                                print(f"[AUTO-TRAIN] ✅ Нейросеть {p} ({tf}) готова!")
+                            except Exception as ex:
+                                print(f"[AUTO-TRAIN] ❌ Ошибка: {ex}")
+                        threading.Thread(target=_auto_train_settings, daemon=True).start()
+                        # Уведомляем пользователя что началось обучение
+                        try:
+                            msg_train = f"Модель для {new_pair} ({new_tf}) не найдена. Запущено автоматическое обучение нейросети..." if lang == "ru" else f"No model for {new_pair} ({new_tf}). Auto-training started in background..."
+                            page.snack_bar = ft.SnackBar(
+                                ft.Text(msg_train),
+                                bgcolor="#f59e0b",
+                                duration=5000
+                            )
+                            page.snack_bar.open = True
+                            page.update()
+                        except Exception:
+                            pass
+                        return
+                except Exception as ex:
+                    print(f"Error checking model for auto-train: {ex}")
+
             try:
                 page.snack_bar = ft.SnackBar(
                     ft.Text(t_saved), 

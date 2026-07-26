@@ -2018,15 +2018,40 @@ def start_bot_scheduler():
     timeframe = dict(settings).get("timeframe", "1m") or "1m"
     
     if not scalping_ensemble.load_models_from_disk(pair, timeframe):
-        print(f"Модели для {pair} ({timeframe}) мгновенно инициализированы из ОЗУ (без блокирующего обучения).")
-        if scalping_ensemble.dlinear_model is None:
-            scalping_ensemble.dlinear_model = scalping_ensemble.NumPyDLinear(seq_len=60, pred_len=2)
-        if scalping_ensemble.classifier_model is None:
-            scalping_ensemble.classifier_model = scalping_ensemble.NumPyClassifier(num_features=12)
-        if scalping_ensemble.ai_trailing_model is None:
-            scalping_ensemble.ai_trailing_model = scalping_ensemble.NumPyTrailingModel(num_features=12)
-        scalping_ensemble.current_model_pair = pair
-        scalping_ensemble.current_model_timeframe = timeframe
+        import os
+        model_file = f"models/{pair}_{timeframe}.pkl"
+        if not os.path.exists(model_file):
+            # Модели нет на диске — запускаем обучение в фоне автоматически
+            print(f"[AUTO-TRAIN] Модель для {pair} ({timeframe}) не найдена. Запуск автоматического обучения...")
+            # Создаём минимальные пустые модели чтобы бот мог стартовать пока обучение идёт в фоне
+            if scalping_ensemble.dlinear_model is None:
+                scalping_ensemble.dlinear_model = scalping_ensemble.NumPyDLinear(seq_len=60, pred_len=2)
+            if scalping_ensemble.classifier_model is None:
+                scalping_ensemble.classifier_model = scalping_ensemble.NumPyClassifier(num_features=12)
+            if scalping_ensemble.ai_trailing_model is None:
+                scalping_ensemble.ai_trailing_model = scalping_ensemble.NumPyTrailingModel(num_features=12)
+            scalping_ensemble.current_model_pair = pair
+            scalping_ensemble.current_model_timeframe = timeframe
+
+            def _auto_train(p=pair, tf=timeframe):
+                try:
+                    print(f"[AUTO-TRAIN] Начало обучения нейросети {p} ({tf})...")
+                    scalping_ensemble.bootstrap_virtual_training(p, tf)
+                    print(f"[AUTO-TRAIN] ✅ Нейросеть {p} ({tf}) успешно обучена и готова к работе!")
+                except Exception as ex:
+                    print(f"[AUTO-TRAIN] ❌ Ошибка обучения {p} ({tf}): {ex}")
+            threading.Thread(target=_auto_train, daemon=True).start()
+        else:
+            # Файл есть, но load_models_from_disk вернул False — создаём пустые объекты
+            print(f"Модели для {pair} ({timeframe}) мгновенно инициализированы из ОЗУ (без блокирующего обучения).")
+            if scalping_ensemble.dlinear_model is None:
+                scalping_ensemble.dlinear_model = scalping_ensemble.NumPyDLinear(seq_len=60, pred_len=2)
+            if scalping_ensemble.classifier_model is None:
+                scalping_ensemble.classifier_model = scalping_ensemble.NumPyClassifier(num_features=12)
+            if scalping_ensemble.ai_trailing_model is None:
+                scalping_ensemble.ai_trailing_model = scalping_ensemble.NumPyTrailingModel(num_features=12)
+            scalping_ensemble.current_model_pair = pair
+            scalping_ensemble.current_model_timeframe = timeframe
     else:
         print(f"Модели для {pair} ({timeframe}) успешно загружены с диска.")
     
