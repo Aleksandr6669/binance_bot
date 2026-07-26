@@ -1419,7 +1419,10 @@ def evaluate_market_signal(persist_log=False, place_order=False):
                 # 1. Прямой разворот тренда ИИ (BUY -> SELL или SELL -> BUY)
                 is_reversal = (action in ["BUY", "SELL"] and action != current_side and not vol_blocked and prob > threshold)
                 
-                # Расчет адаптивного времени застоя (3 свечи выбранного таймфрейма: 1m -> 3мин, 15m -> 45мин, 1h -> 3ч)
+                st_candles_cfg = int(s.get("stagnation_candles", 3))
+                st_pnl_cfg = float(s.get("stagnation_pnl_threshold", 0.30)) / 100.0
+
+                # Расчет адаптивного времени застоя (настраиваемое кол-во свечей выбранного таймфрейма)
                 tf_sec = 60
                 tf_lower = str(timeframe).lower().strip()
                 if tf_lower.endswith("m"):
@@ -1431,19 +1434,18 @@ def evaluate_market_signal(persist_log=False, place_order=False):
                 elif tf_lower.endswith("d"):
                     try: tf_sec = int(tf_lower[:-1]) * 86400
                     except: tf_sec = 86400
-                stagnation_min_sec = tf_sec * 3
+                stagnation_min_sec = tf_sec * st_candles_cfg
 
                 bot_uptime_sec = time.time() - BOT_STARTUP_TIME
 
-                # 2. ⏳ Выход по ЗАСТОЮ ИИ (только если режим STAGNATION_AND_REVERSAL И бот активен от 3 минут)
+                # 2. ⏳ Выход по ЗАСТОЮ ИИ (только если режим STAGNATION_AND_REVERSAL И бот активен)
                 is_stagnation_exit = False
                 if ai_exit_mode == "STAGNATION_AND_REVERSAL" and order_age_sec >= stagnation_min_sec and bot_uptime_sec >= stagnation_min_sec:
                     pnl_pct = (current_close - entry_price) / entry_price if current_side == "BUY" else (entry_price - current_close) / entry_price
                     # Выход по застою активируется СТРОГО в плюсе или в ноле (PnL >= 0.0), никогда не закрывая в минус
-                    if pnl_pct >= 0.0 and (pnl_pct < 0.0015 or (pnl_pct < 0.0030 and pred_change_1m <= 0.0001)):
+                    if pnl_pct >= 0.0 and (pnl_pct < (st_pnl_cfg * 0.5) or (pnl_pct < st_pnl_cfg and pred_change_1m <= 0.0001)):
                         is_stagnation_exit = True
-                        st_candles = 3
-                        exit_reason_label = f"застой цены ИИ (отсутствие роста {st_candles} свечи / {int(stagnation_min_sec/60)} мин)"
+                        exit_reason_label = f"застой цены ИИ (отсутствие роста {st_candles_cfg} свечей / {int(stagnation_min_sec/60)} мин)"
 
                 # 3. 🤖 НЕЙРОСЕТЕВАЯ МОДЕЛЬ ВЫХОДА (только при режиме STAGNATION_AND_REVERSAL И бот активен от 60 сек)
                 is_neural_exit = False

@@ -237,7 +237,9 @@ def build_settings_view(page: ft.Page, lang: str):
                 float(loss_limit_field.value or 0),
                 float(profit_target_field.value or 0),
                 float(limit_offset_dd.value if limit_offset_dd.value and limit_offset_dd.value != "ai" else 1.0),
-                ai_exit_mode_dd.value if ai_exit_mode_dd and ai_exit_mode_dd.value else "STAGNATION_AND_REVERSAL"
+                ai_exit_mode_dd.value if ai_exit_mode_dd and ai_exit_mode_dd.value else "STAGNATION_AND_REVERSAL",
+                int(stagnation_candles_dd.value or 3) if 'stagnation_candles_dd' in locals() and stagnation_candles_dd else 3,
+                float(stagnation_pnl_dd.value or 0.30) if 'stagnation_pnl_dd' in locals() and stagnation_pnl_dd else 0.30
             )
             t_saved = t("settings_saved", lang)
             
@@ -782,15 +784,60 @@ def build_settings_view(page: ft.Page, lang: str):
         page.update()
         trigger_autosave_instant()
 
+    def on_ai_exit_mode_change(e):
+        is_stagnation = (ai_exit_mode_dd.value == "STAGNATION_AND_REVERSAL")
+        stagnation_candles_dd.disabled = not is_stagnation
+        stagnation_pnl_dd.disabled = not is_stagnation
+        page.update()
+        trigger_autosave_instant()
+
     ai_exit_mode_dd = make_dropdown(
         options=[
-            ft.dropdown.Option("REVERSAL_ONLY", "Разворот ИИ"),
-            ft.dropdown.Option("STAGNATION_AND_REVERSAL", "Разворот + Застой"),
+            ft.dropdown.Option("REVERSAL_ONLY", "Разворот ИИ" if lang == "ru" else "AI Reversal"),
+            ft.dropdown.Option("STAGNATION_AND_REVERSAL", "Разворот + Застой" if lang == "ru" else "Reversal + Stagnation"),
         ],
         value=settings.get("ai_exit_mode", "STAGNATION_AND_REVERSAL"),
         width=205,
+        on_change=on_ai_exit_mode_change
+    )
+
+    stagnation_candles_options = [
+        ("1", "1 свеча" if lang == "ru" else "1 candle"),
+        ("2", "2 свечи" if lang == "ru" else "2 candles"),
+        ("3", "3 свечи (стандарт)" if lang == "ru" else "3 candles (default)"),
+        ("4", "4 свечи" if lang == "ru" else "4 candles"),
+        ("5", "5 свечей" if lang == "ru" else "5 candles"),
+        ("7", "7 свечей" if lang == "ru" else "7 candles"),
+        ("10", "10 свечей" if lang == "ru" else "10 candles"),
+    ]
+    stagnation_candles_dd = make_dropdown(
+        options=[ft.dropdown.Option(k, v) for k, v in stagnation_candles_options],
+        value=str(settings.get("stagnation_candles", 3)),
+        width=175,
         on_change=trigger_autosave_instant
     )
+
+    stagnation_pnl_options = [
+        ("0.05", "0.05% (Микро)" if lang == "ru" else "0.05% (Micro)"),
+        ("0.10", "0.10% (Узкий)" if lang == "ru" else "0.10% (Narrow)"),
+        ("0.15", "0.15% (Умеренный)" if lang == "ru" else "0.15% (Moderate)"),
+        ("0.20", "0.20% (Стандарт)" if lang == "ru" else "0.20% (Standard)"),
+        ("0.30", "0.30% (По умолчанию)" if lang == "ru" else "0.30% (Default)"),
+        ("0.50", "0.50% (Расширенный)" if lang == "ru" else "0.50% (Extended)"),
+        ("1.00", "1.00% (Широкий)" if lang == "ru" else "1.00% (Wide)"),
+    ]
+    curr_stag_pnl = float(settings.get("stagnation_pnl_threshold", 0.30))
+    curr_stag_pnl_str = f"{curr_stag_pnl:.2f}"
+    stagnation_pnl_dd = make_dropdown(
+        options=[ft.dropdown.Option(k, v) for k, v in stagnation_pnl_options],
+        value=curr_stag_pnl_str if any(k == curr_stag_pnl_str for k, _ in stagnation_pnl_options) else "0.30",
+        width=185,
+        on_change=trigger_autosave_instant
+    )
+
+    is_stagnation_init = (settings.get("ai_exit_mode", "STAGNATION_AND_REVERSAL") == "STAGNATION_AND_REVERSAL")
+    stagnation_candles_dd.disabled = not is_stagnation_init
+    stagnation_pnl_dd.disabled = not is_stagnation_init
 
     use_limit_sw = ft.Switch(value=is_limit_active, on_change=on_limit_change)
     use_ai_limit_sw = ft.Switch(value=settings.get("use_ai_limit_price", 0) == 1, on_change=trigger_autosave_instant)
@@ -900,6 +947,56 @@ def build_settings_view(page: ft.Page, lang: str):
             ai_exit_box
         ],
         spacing=10
+    )
+
+    stagnation_control_box = ft.Container(
+        content=ft.Row(
+            [
+                ft.Column(
+                    [
+                        ft.Text("ПАРАМЕТРЫ ЗАСТОЯ ИИ" if lang == "ru" else "AI STAGNATION PARAMETERS", size=12, weight=ft.FontWeight.BOLD, color="#38bdf8"),
+                        ft.Text("Настройка времени (в свечах) и порога PnL для выхода при затишье" if lang == "ru" else "Adjust duration (candles) and profit threshold for stagnation exit", size=11, color="#94a3b8")
+                    ],
+                    expand=True
+                ),
+                ft.Row(
+                    [
+                        ft.Text("Длительность:" if lang == "ru" else "Duration:", size=11, color="#f8fafc"),
+                        stagnation_candles_dd,
+                        ft.Text("Порог PnL:" if lang == "ru" else "PnL Threshold:", size=11, color="#f8fafc"),
+                        stagnation_pnl_dd,
+                    ],
+                    spacing=10,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER
+                )
+            ],
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER
+        ),
+        bgcolor=ft.Colors.with_opacity(0.05, "#ffffff"),
+        padding=15,
+        border_radius=8,
+        border=ft.Border.all(1, ft.Colors.TRANSPARENT)
+    )
+
+    smart_card = make_glass_card(
+        ft.Column(
+            [
+                ft.Row([ft.Icon(ft.Icons.AUTO_AWESOME_ROUNDED, color="#38bdf8"), ft.Text(t("smart_logic_title", lang), size=16, weight=ft.FontWeight.BOLD, color="#f8fafc")]),
+                ft.Divider(color=ft.Colors.with_opacity(0.1, "#ffffff")),
+                switches_row,
+                ft.Container(height=10),
+                stagnation_control_box,
+                ft.Container(height=10),
+                trailing_stop_box,
+                ft.Container(height=10),
+                risk_limits_box,
+                ft.Container(height=10),
+                ft.Container(height=10)
+            ],
+            spacing=10
+        ),
+        {"xs": 12, "md": 12}
     )
     
     trailing_stop_box = ft.Container(
