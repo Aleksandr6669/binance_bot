@@ -1383,24 +1383,6 @@ def evaluate_market_signal(persist_log=False, place_order=False):
             except Exception as e:
                 print(f"Failed to persist analysis log (non-fatal): {e}")
 
-        # Проверка кулдауна после закрытия сделки ИИ (чтобы не переоткрывать одну и ту же позицию подряд каждые 2 сек)
-        is_cooldown_active = False
-        try:
-            recent_closed = db.get_orders(limit=10)
-            for ro in recent_closed:
-                if ro.get("pair", "").upper() == pair.upper() and ro.get("side", "").upper() == action:
-                    c_status = str(ro.get("status", "")).upper()
-                    if c_status in ["CLOSED_MANUAL", "CLOSED_TP", "CLOSED_SL"]:
-                        c_at = ro.get("closed_at") or ro.get("created_at")
-                        if c_at:
-                            c_dt = pd.to_datetime(c_at)
-                            elapsed_sec = (pd.Timestamp.now() - c_dt).total_seconds()
-                            if elapsed_sec < 180: # 3 минуты паузы на повторный вход в ту же сторону
-                                is_cooldown_active = True
-                                break
-        except Exception as cd_ex:
-            print(f"Error checking exit cooldown: {cd_ex}")
-
         order_msg = "Рекомендация: HOLD (нет сигнала на вход)."
         if vol_blocked:
             order_msg = "Анализ завершен. Вход заблокирован высокой волатильностью."
@@ -1414,6 +1396,7 @@ def evaluate_market_signal(persist_log=False, place_order=False):
             if active_order and use_ai_exit:
                 current_side = active_order["side"].upper()
                 order_created_at = active_order.get("created_at")
+                entry_price = float(active_order["entry_price"])
                 order_age_sec = 999.0
                 if order_created_at:
                     try:
@@ -1425,20 +1408,28 @@ def evaluate_market_signal(persist_log=False, place_order=False):
                 # 1. Прямой разворот тренда ИИ (BUY -> SELL или SELL -> BUY)
                 is_reversal = (action in ["BUY", "SELL"] and action != current_side and not vol_blocked and prob > threshold)
                 
-                # 2. 🤖 100% НЕЙРОСЕТЕВАЯ МОДЕЛЬ ВЫХОДА (NumPyAIExitModel на 14 признаках)
+                # 2. ⏳ Выход по ЗАСТОЮ ИИ (если нет роста / движения цены в течение 3+ минут)
+                is_stagnation_exit = False
+                if order_age_sec >= 180: # Прошло 3 минуты
+                    pnl_pct = (current_close - entry_price) / entry_price if current_side == "BUY" else (entry_price - current_close) / entry_price
+                    # Если с момента входа цена почти не выросла (|PnL| < 0.15%) или застряла во флэте
+                    if abs(pnl_pct) < 0.0015 or (pnl_pct < 0.0030 and pred_change_1m <= 0.0001):
+                        is_stagnation_exit = True
+                        exit_reason_label = "застой цены ИИ (отсутствие роста 3+ мин)"
+
+                # 3. 🤖 НЕЙРОСЕТЕВАЯ МОДЕЛЬ ВЫХОДА (NumPyAIExitModel при прогнозе просадки)
                 is_neural_exit = False
-                if order_age_sec >= 30:
+                if order_age_sec >= 60 and not is_stagnation_exit:
                     ai_exit_res = scalping_ensemble.evaluate_ai_exit_neural_decision(active_order, current_close, features)
-                    if ai_exit_res.get("should_exit", False):
+                    if ai_exit_res.get("should_exit", False) and ai_exit_res.get("exit_prob", 0.0) >= 0.75:
                         is_neural_exit = True
                         exit_reason_label = f"нейросеть выходов ({ai_exit_res.get('exit_prob', 0.0)*100:.1f}%)"
 
-                # 3. Умный ИИ-трейлинг стоп (NumPyTrailingModel на 12 фичах, только при профите)
+                # 4. Умный ИИ-трейлинг стоп (NumPyTrailingModel на 12 фичах, только при профите > +0.3%)
                 is_ai_trailing_exit = False
-                if use_ai_trailing and not is_reversal and not is_neural_exit:
+                if use_ai_trailing and not is_reversal and not is_stagnation_exit and not is_neural_exit:
                     try:
                         ai_trail_dist_pct = float(scalping_ensemble.ai_trailing_model.predict(features))
-                        entry_price = float(active_order["entry_price"])
                         if current_side == "BUY":
                             peak_price = float(active_order.get("peak_price") or entry_price)
                             peak_price = max(peak_price, current_close)
@@ -1454,7 +1445,7 @@ def evaluate_market_signal(persist_log=False, place_order=False):
                     except Exception as trail_ex:
                         print(f"Error in ai_trailing evaluation: {trail_ex}")
 
-                should_ai_exit = is_reversal or is_neural_exit or is_ai_trailing_exit
+                should_ai_exit = is_reversal or is_stagnation_exit or is_neural_exit or is_ai_trailing_exit
 
             if should_ai_exit and active_order:
                 entry_price = float(active_order["entry_price"])
@@ -1539,15 +1530,12 @@ def evaluate_market_signal(persist_log=False, place_order=False):
                 else:
                     order_msg = f"Позиция по {pair} уже открыта. Анализ продолжается."
         elif action in ["BUY", "SELL"] and place_order:
-            if is_cooldown_active:
-                order_msg = f"Сигнал {action} активен, но повторный вход заблокирован паузой (3 мин кулдаун после закрытия ИИ)."
+            order_type_desc = "лимитный" if use_limit_orders else "рыночный"
+            if trading_mode == "LIVE":
+                order_msg = f"Размещен LIVE {order_type_desc} ордер {action} на Binance по паре {pair} ({market_type})!"
             else:
-                order_type_desc = "лимитный" if use_limit_orders else "рыночный"
-                if trading_mode == "LIVE":
-                    order_msg = f"Размещен LIVE {order_type_desc} ордер {action} на Binance по паре {pair} ({market_type})!"
-                else:
-                    order_msg = f"Размещен DEMO {order_type_desc} ордер {action} по паре {pair} ({market_type})!"
-                place_scalping_order(pair, current_close, trading_mode, order_size_usdt, market_type, futures_leverage, current_atr, side=action, prob=prob, pred_change_1m=pred_change_1m)
+                order_msg = f"Размещен DEMO {order_type_desc} ордер {action} по паре {pair} ({market_type})!"
+            place_scalping_order(pair, current_close, trading_mode, order_size_usdt, market_type, futures_leverage, current_atr, side=action, prob=prob, pred_change_1m=pred_change_1m)
 
         # Подготавливаем последний лог для передачи в websocket (не обязательно сохранять в БД)
         created_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
