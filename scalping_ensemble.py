@@ -1375,6 +1375,7 @@ def _retrain_on_market_history_inner(pair, timeframe):
         conn.close()
         
         if orders_rows:
+            mapped_count = 0
             for order in orders_rows:
                 try:
                     from datetime import datetime, timezone
@@ -1386,9 +1387,11 @@ def _retrain_on_market_history_inner(pair, timeframe):
                         closest_idx = df[match_mask].index[-1]
                         is_win = 1 if (order["pnl"] is not None and float(order["pnl"]) > 0) else 0
                         df.loc[closest_idx, 'target'] = is_win
-                        logger.info(f"Обучение: Наложен реальный исход ордера #{order['id']} на индекс {closest_idx} (PnL={order['pnl']}, target={is_win})")
+                        mapped_count += 1
                 except Exception as o_ex:
-                    logger.error(f"Ошибка сопоставления ордера #{order.get('id')} при дообучении: {o_ex}")
+                    pass
+            if mapped_count > 0:
+                logger.info(f"Обучение: Сопоставлено {mapped_count} закрытых ордеров из БД с обучающей выборкой.")
     except Exception as db_ex:
         logger.error(f"Ошибка при извлечении реальных ордеров из БД для дообучения: {db_ex}")
         
