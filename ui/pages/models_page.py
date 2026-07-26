@@ -259,7 +259,8 @@ def build_models_view(page: ft.Page, lang: str):
                             shape=ft.RoundedRectangleBorder(radius=6),
                             padding=ft.Padding.symmetric(vertical=5, horizontal=10)
                         ),
-                        on_click=make_delete_handler(pair, tf)
+                        on_click=make_delete_handler(pair, tf),
+                        visible=not is_active  # Скрыть кнопку удаления для активной модели
                     )
                 ], alignment=ft.MainAxisAlignment.END, spacing=6)
 
@@ -374,15 +375,21 @@ def build_models_view(page: ft.Page, lang: str):
                     # Action / Loader row
                     action_area
                 ]),
-                bgcolor=ft.Colors.with_opacity(0.05, "#ffffff") if not is_active else ft.Colors.with_opacity(0.1, "#ffffff"),
+                bgcolor=ft.Colors.with_opacity(0.16, GOLD_COLOR) if is_active else ft.Colors.with_opacity(0.05, "#ffffff"),
                 blur=ft.Blur(10, 10, ft.BlurTileMode.MIRROR),
                 padding=ft.Padding(14, 10, 14, 10),
                 border_radius=10,
                 height=220,
                 border=ft.Border.all(
-                    1.5 if is_active else 1,
+                    2 if is_active else 1,
                     GOLD_COLOR if is_active else ft.Colors.with_opacity(0.1, "#ffffff")
                 ),
+                shadow=ft.BoxShadow(
+                    spread_radius=0,
+                    blur_radius=18,
+                    color=ft.Colors.with_opacity(0.35, GOLD_COLOR),
+                    offset=ft.Offset(0, 0)
+                ) if is_active else None,
                 col={"xs": 12}
             )
             models_grid.controls.append(card)
