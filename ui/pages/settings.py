@@ -979,26 +979,6 @@ def build_settings_view(page: ft.Page, lang: str):
         border=ft.Border.all(1, ft.Colors.TRANSPARENT)
     )
 
-    smart_card = make_glass_card(
-        ft.Column(
-            [
-                ft.Row([ft.Icon(ft.Icons.AUTO_AWESOME_ROUNDED, color="#38bdf8"), ft.Text(t("smart_logic_title", lang), size=16, weight=ft.FontWeight.BOLD, color="#f8fafc")]),
-                ft.Divider(color=ft.Colors.with_opacity(0.1, "#ffffff")),
-                switches_row,
-                ft.Container(height=10),
-                stagnation_control_box,
-                ft.Container(height=10),
-                trailing_stop_box,
-                ft.Container(height=10),
-                risk_limits_box,
-                ft.Container(height=10),
-                ft.Container(height=10)
-            ],
-            spacing=10
-        ),
-        {"xs": 12, "md": 12}
-    )
-    
     trailing_stop_box = ft.Container(
         content=ft.Row(
             [
@@ -1053,6 +1033,8 @@ def build_settings_view(page: ft.Page, lang: str):
                 ft.Row([ft.Icon(ft.Icons.AUTO_AWESOME_ROUNDED, color="#38bdf8"), ft.Text(t("smart_logic_title", lang), size=16, weight=ft.FontWeight.BOLD, color="#f8fafc")]),
                 ft.Divider(color=ft.Colors.with_opacity(0.1, "#ffffff")),
                 switches_row,
+                ft.Container(height=10),
+                stagnation_control_box,
                 ft.Container(height=10),
                 trailing_stop_box,
                 ft.Container(height=10),
