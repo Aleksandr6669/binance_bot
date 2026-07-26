@@ -939,7 +939,7 @@ def check_and_reload_models():
         # 1. Попытка загрузить модели с диска
         if not scalping_ensemble.load_models_from_disk(pair, timeframe):
             if scalping_ensemble.dlinear_model is None:
-                scalping_ensemble.dlinear_model = scalping_ensemble.DLinearNumPy(seq_len=60, pred_len=2)
+                scalping_ensemble.dlinear_model = scalping_ensemble.NumPyDLinear(seq_len=60, pred_len=2)
             if scalping_ensemble.classifier_model is None:
                 scalping_ensemble.classifier_model = scalping_ensemble.NumPyClassifier(n_features=12)
             if scalping_ensemble.ai_trailing_model is None:
@@ -1988,7 +1988,7 @@ def start_bot_scheduler():
     if not scalping_ensemble.load_models_from_disk(pair, timeframe):
         print(f"Модели для {pair} ({timeframe}) мгновенно инициализированы из ОЗУ (без блокирующего обучения).")
         if scalping_ensemble.dlinear_model is None:
-            scalping_ensemble.dlinear_model = scalping_ensemble.DLinearNumPy(seq_len=60, pred_len=2)
+            scalping_ensemble.dlinear_model = scalping_ensemble.NumPyDLinear(seq_len=60, pred_len=2)
         if scalping_ensemble.classifier_model is None:
             scalping_ensemble.classifier_model = scalping_ensemble.NumPyClassifier(n_features=12)
         if scalping_ensemble.ai_trailing_model is None:
