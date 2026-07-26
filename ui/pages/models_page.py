@@ -375,7 +375,7 @@ def build_models_view(page: ft.Page, lang: str):
                     # Action / Loader row
                     action_area
                 ]),
-                bgcolor=ft.Colors.with_opacity(0.16, GOLD_COLOR) if is_active else ft.Colors.with_opacity(0.05, "#ffffff"),
+                bgcolor=ft.Colors.with_opacity(0.05, "#ffffff"),
                 blur=ft.Blur(10, 10, ft.BlurTileMode.MIRROR),
                 padding=ft.Padding(14, 10, 14, 10),
                 border_radius=10,
@@ -386,8 +386,8 @@ def build_models_view(page: ft.Page, lang: str):
                 ),
                 shadow=ft.BoxShadow(
                     spread_radius=0,
-                    blur_radius=18,
-                    color=ft.Colors.with_opacity(0.35, GOLD_COLOR),
+                    blur_radius=14,
+                    color=ft.Colors.with_opacity(0.28, GOLD_COLOR),
                     offset=ft.Offset(0, 0)
                 ) if is_active else None,
                 col={"xs": 12}
