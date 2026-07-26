@@ -452,12 +452,12 @@ def build_dashboard_view(page: ft.Page, lang: str):
         except Exception as ex:
             pass
 
-        # 5. Логи ИИ (ТОЛЬКО 100% Живой расчет в реальном времени из ОЗУ без сохраненных логов!)
+        # 5. Логи ИИ (ТОЛЬКО 100% Живой расчет в реальном времени из ОЗУ!)
         try:
             latest_log = trading_engine.LATEST_LIVE_SIGNAL
             
-            # Если сигнала еще нет или он относится к другой паре/таймфрейму — рассчитываем СВЕЖИЙ живой сигнал прямо сейчас
-            if not latest_log or latest_log.get("pair") != pair or latest_log.get("timeframe") != timeframe:
+            # Если сигнала ещё нет вообще — делаем единоразовый первичный инференс
+            if latest_log is None:
                 try:
                     await asyncio.to_thread(trading_engine.evaluate_market_signal, False, False)
                     latest_log = trading_engine.LATEST_LIVE_SIGNAL

@@ -1601,7 +1601,9 @@ def evaluate_market_signal(persist_log=False, place_order=False):
             "stage1_output": stage1_out,
             "stage2_output": stage2_out,
             "stage3_output": stage3_out,
-            "created_at": created_at
+            "created_at": created_at,
+            "pair": pair,
+            "timeframe": timeframe
         }
         global LATEST_LIVE_SIGNAL
         LATEST_LIVE_SIGNAL = latest_log
