@@ -208,7 +208,8 @@ class NumPyClassifier:
     Логистическая регрессия на NumPy.
     Используется в качестве резервного варианта при ошибках загрузки LightGBM.
     """
-    def __init__(self, num_features=6):
+    def __init__(self, num_features=6, **kwargs):
+        num_features = kwargs.get("n_features", num_features)
         self.W = np.random.normal(0, 0.1, (num_features,))
         self.b = 0.0
         self.mean = None
@@ -256,7 +257,8 @@ class NumPyTrailingModel:
     Линейная регрессия на NumPy для оценки оптимального отступа трейлинг-стопа.
     Предсказывает волатильность (стандартное отклонение цены на 10 свечей вперед).
     """
-    def __init__(self, num_features=7):
+    def __init__(self, num_features=7, **kwargs):
+        num_features = kwargs.get("n_features", num_features)
         self.W = np.zeros((num_features,))
         self.b = 0.005  # Начинаем с отступа в 0.5% по умолчанию
         self.mean = None

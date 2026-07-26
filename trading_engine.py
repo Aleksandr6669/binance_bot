@@ -941,9 +941,9 @@ def check_and_reload_models():
             if scalping_ensemble.dlinear_model is None:
                 scalping_ensemble.dlinear_model = scalping_ensemble.NumPyDLinear(seq_len=60, pred_len=2)
             if scalping_ensemble.classifier_model is None:
-                scalping_ensemble.classifier_model = scalping_ensemble.NumPyClassifier(n_features=12)
+                scalping_ensemble.classifier_model = scalping_ensemble.NumPyClassifier(num_features=12)
             if scalping_ensemble.ai_trailing_model is None:
-                scalping_ensemble.ai_trailing_model = scalping_ensemble.NumPyTrailingModel(n_features=12)
+                scalping_ensemble.ai_trailing_model = scalping_ensemble.NumPyTrailingModel(num_features=12)
             scalping_ensemble.current_model_pair = pair
             scalping_ensemble.current_model_timeframe = timeframe
         print(f"=== [ИИ] МОДЕЛИ УСПЕШНО НАСТРОЕНЫ ДЛЯ РАБОТЫ С {pair} ({timeframe}) ===\n")
@@ -1990,9 +1990,9 @@ def start_bot_scheduler():
         if scalping_ensemble.dlinear_model is None:
             scalping_ensemble.dlinear_model = scalping_ensemble.NumPyDLinear(seq_len=60, pred_len=2)
         if scalping_ensemble.classifier_model is None:
-            scalping_ensemble.classifier_model = scalping_ensemble.NumPyClassifier(n_features=12)
+            scalping_ensemble.classifier_model = scalping_ensemble.NumPyClassifier(num_features=12)
         if scalping_ensemble.ai_trailing_model is None:
-            scalping_ensemble.ai_trailing_model = scalping_ensemble.NumPyTrailingModel(n_features=12)
+            scalping_ensemble.ai_trailing_model = scalping_ensemble.NumPyTrailingModel(num_features=12)
         scalping_ensemble.current_model_pair = pair
         scalping_ensemble.current_model_timeframe = timeframe
     else:
