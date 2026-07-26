@@ -451,15 +451,15 @@ def build_dashboard_view(page: ft.Page, lang: str):
         except Exception as ex:
             pass
 
-        # 5. Логи ИИ (Читаем живой расчет в реальном времени из памяти, либо лог из БД при старте)
+        # 5. Логи ИИ (Живой расчет в реальном времени из ОЗУ без старых логов БД!)
         try:
             latest_log = trading_engine.LATEST_LIVE_SIGNAL
-            source_desc = "Live prediction"
             if not latest_log:
-                analysis_logs = await asyncio.to_thread(db.get_all_analysis_logs)
-                if analysis_logs:
-                    latest_log = analysis_logs[0]
-                    source_desc = "Database log"
+                # Если лога в ОЗУ еще нет — выполняем точечный инференс прямо сейчас
+                await asyncio.to_thread(trading_engine.evaluate_market_signal, False, False)
+                latest_log = trading_engine.LATEST_LIVE_SIGNAL
+            
+            source_desc = "Live prediction"
             
             if latest_log:
                 ml_logs_stage1.value = latest_log.get("stage1_output") or "—"
