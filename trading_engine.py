@@ -1409,28 +1409,23 @@ def evaluate_market_signal(persist_log=False, place_order=False):
                 # 1. Прямой разворот тренда ИИ (BUY -> SELL или SELL -> BUY)
                 is_reversal = (action in ["BUY", "SELL"] and action != current_side and not vol_blocked and prob > threshold)
                 
-                # 2. Угасание импульса БЕЗ разворота (только при сущностном сдвиге прогноза и возрасте сделки > 30 сек)
-                is_signal_decay = False
-                if order_age_sec >= 30:
-                    if current_side == "BUY":
-                        if pred_change_1m < -0.0020 or (raw_prob < 0.25):
-                            is_signal_decay = True
-                            exit_reason_label = "слом тренда ИИ (прогноз -0.2%)"
-                    elif current_side == "SELL":
-                        if pred_change_1m > 0.0020 or (raw_prob > 0.75):
-                            is_signal_decay = True
-                            exit_reason_label = "слом тренда ИИ (прогноз +0.2%)"
+                # 2. 🤖 100% НЕЙРОСЕТЕВАЯ МОДЕЛЬ ВЫХОДА (NumPyAIExitModel на 14 признаках)
+                is_neural_exit = False
+                if order_age_sec >= 15:
+                    ai_exit_res = scalping_ensemble.evaluate_ai_exit_neural_decision(active_order, current_close, features)
+                    if ai_exit_res.get("should_exit", False):
+                        is_neural_exit = True
+                        exit_reason_label = f"нейросеть выходов ({ai_exit_res.get('exit_prob', 0.0)*100:.1f}%)"
 
                 # 3. Умный ИИ-трейлинг стоп (NumPyTrailingModel на 12 фичах, только при профите)
                 is_ai_trailing_exit = False
-                if use_ai_trailing and not is_reversal and not is_signal_decay:
+                if use_ai_trailing and not is_reversal and not is_neural_exit:
                     try:
                         ai_trail_dist_pct = float(scalping_ensemble.ai_trailing_model.predict(features))
                         entry_price = float(active_order["entry_price"])
                         if current_side == "BUY":
                             peak_price = float(active_order.get("peak_price") or entry_price)
                             peak_price = max(peak_price, current_close)
-                            # Активируем трейлинг только после достижения начальной прибыли +0.3%
                             if peak_price >= entry_price * 1.003 and (peak_price - current_close) / entry_price >= ai_trail_dist_pct:
                                 is_ai_trailing_exit = True
                                 exit_reason_label = f"ИИ-трейлинг стоп ({ai_trail_dist_pct*100:.2f}%)"
@@ -1443,7 +1438,7 @@ def evaluate_market_signal(persist_log=False, place_order=False):
                     except Exception as trail_ex:
                         print(f"Error in ai_trailing evaluation: {trail_ex}")
 
-                should_ai_exit = is_reversal or is_signal_decay or is_ai_trailing_exit
+                should_ai_exit = is_reversal or is_neural_exit or is_ai_trailing_exit
 
             if should_ai_exit and active_order:
                 entry_price = float(active_order["entry_price"])

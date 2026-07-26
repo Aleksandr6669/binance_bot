@@ -304,10 +304,76 @@ class NumPyTrailingModel:
             self.W -= lr * dW
             self.b -= lr * db
 
+class NumPyAIExitModel:
+    """
+    Нейронная модель выходов из позиций (AI Exit Neural Network).
+    Принимает 14 признаков (12 рыночных фичей + floating PnL% + возраст сделки)
+    и высчитывает чисто нейросетевую вероятность необходимости ДОСРОЧНОГО ЗАКРЫТИЯ ордера.
+    """
+    def __init__(self, num_features=14):
+        self.num_features = num_features
+        self.W = np.random.normal(0, 0.1, (num_features,))
+        self.b = -0.5  # смещение в сторону HOLD по умолчанию
+        self.mean = None
+        self.std = None
+
+    def _sigmoid(self, z):
+        return 1.0 / (1.0 + np.exp(-np.clip(z, -15, 15)))
+
+    def predict(self, X):
+        X = np.array(X)
+        if X.ndim == 1:
+            if len(X) != self.num_features:
+                if len(X) < self.num_features:
+                    X = np.pad(X, (0, self.num_features - len(X)), 'constant')
+                else:
+                    X = X[:self.num_features]
+            if self.mean is not None and self.std is not None:
+                X_scaled = (X - self.mean) / self.std
+            else:
+                X_scaled = X
+            z = np.dot(X_scaled, self.W) + self.b
+            return float(self._sigmoid(z))
+        else:
+            if X.shape[1] != self.num_features:
+                if X.shape[1] < self.num_features:
+                    pad_width = ((0, 0), (0, self.num_features - X.shape[1]))
+                    X = np.pad(X, pad_width, 'constant')
+                else:
+                    X = X[:, :self.num_features]
+            if self.mean is not None and self.std is not None:
+                X_scaled = (X - self.mean) / self.std
+            else:
+                X_scaled = X
+            z = X_scaled @ self.W + self.b
+            return self._sigmoid(z)
+
+    def fit(self, X, y, epochs=100, lr=0.05):
+        X = np.array(X)
+        y = np.array(y)
+        N = len(y)
+        if N == 0:
+            return
+        if self.W is None or len(self.W) != X.shape[1]:
+            self.num_features = X.shape[1]
+            self.W = np.random.normal(0, 0.1, (self.num_features,))
+        self.mean = np.mean(X, axis=0)
+        self.std = np.std(X, axis=0) + 1e-8
+        X_scaled = (X - self.mean) / self.std
+
+        for _ in range(epochs):
+            pred = self._sigmoid(X_scaled @ self.W + self.b)
+            err = pred - y
+            dW = (X_scaled.T @ err) / N
+            db = np.mean(err)
+            self.W -= lr * dW
+            self.b -= lr * db
+
 # Глобальные инстанции моделей
 dlinear_model = None
 classifier_model = None
 ai_trailing_model = NumPyTrailingModel(num_features=12)
+ai_exit_model = NumPyAIExitModel(num_features=14)
 current_model_pair = None
 current_model_timeframe = None
 last_virtual_stats = {}
@@ -334,6 +400,62 @@ def predict_ai_trailing_distance(features):
     """
     global ai_trailing_model
     return float(ai_trailing_model.predict(features))
+
+def evaluate_ai_exit_neural_decision(active_order, current_close, features):
+    """
+    Вычисляет чисто нейросетевое решение на досрочный выход из сделки (БЕЗ скриптовых `if` правил).
+    Принимает текущую позицию, цену закрытия и 12 рыночных фичей.
+    Возвращает dict с `should_exit` (bool), `exit_prob` (float) и `reason` (str).
+    """
+    global ai_exit_model
+    if not active_order or ai_exit_model is None:
+        return {"should_exit": False, "exit_prob": 0.0, "reason": "No active order"}
+
+    try:
+        entry_price = float(active_order.get("entry_price", current_close))
+        side = str(active_order.get("side", "BUY")).upper()
+        
+        # PnL % позиции
+        if side == "BUY":
+            pnl_pct = (current_close - entry_price) / (entry_price + 1e-10)
+        else:
+            pnl_pct = (entry_price - current_close) / (entry_price + 1e-10)
+
+        # Длительность сделки в минутах (нормированная до 1.0 за 60 мин)
+        order_created_at = active_order.get("created_at")
+        order_age_min = 0.5
+        if order_created_at:
+            try:
+                o_dt = pd.to_datetime(order_created_at)
+                order_age_min = (pd.Timestamp.now() - o_dt).total_seconds() / 60.0
+            except Exception:
+                order_age_min = 0.5
+        order_age_norm = np.clip(order_age_min / 60.0, 0.0, 1.0)
+
+        # Собираем 14-мерный вектор входных данных для нейросети выходов
+        base_feats = np.array(features).flatten()
+        if len(base_feats) < 12:
+            base_feats = np.pad(base_feats, (0, 12 - len(base_feats)), 'constant')
+        else:
+            base_feats = base_feats[:12]
+
+        full_exit_features = np.append(base_feats, [pnl_pct, order_age_norm])
+        
+        # 🤖 ИИ-НЕЙРОСЕТЕВОЙ ИНФЕРЕНС
+        exit_prob = float(ai_exit_model.predict(full_exit_features))
+
+        # Нейросеть выносит решение на выход при уверенности ИИ > 0.55
+        should_exit = exit_prob >= 0.55
+        reason = f"Нейросеть выходов (уверенность ИИ в закрытии: {exit_prob*100:.1f}%)"
+
+        return {
+            "should_exit": should_exit,
+            "exit_prob": exit_prob,
+            "reason": reason
+        }
+    except Exception as e:
+        logger.error(f"Error in evaluate_ai_exit_neural_decision: {e}")
+        return {"should_exit": False, "exit_prob": 0.0, "reason": str(e)}
 
 import pickle
 import os
@@ -395,6 +517,7 @@ def save_models_to_disk(pair, timeframe):
             "dlinear": dlinear_model,
             "classifier": classifier_model,
             "trailing": ai_trailing_model,
+            "exit_model": ai_exit_model,
             "loss": last_loss,
             "virtual_stats": v_stat,
             "val_stats": val_stat,
@@ -1989,6 +2112,32 @@ def _bootstrap_virtual_training_inner(pair, timeframe):
     logger.info(f"✅ Точность классификатора на проверке (VAL): {val_stat['winrate']}% ({val_stat['wins']}/{val_stat['total']} сигналов) при пороге {val_stat['threshold']:.2f}")
 
     ai_trailing_model.fit(valid_df[feature_cols].values, valid_df['volatility_target'].values, epochs=150, lr=0.01)
+
+    # 5. Обучение Нейросети выходов (AI Exit Neural Net)
+    try:
+        exit_X_list = []
+        exit_y_list = []
+        n_valid = len(valid_df)
+        closes_arr = df['close'].values
+        feats_arr = df[feature_cols].dropna().values
+        
+        for idx_ev in range(n_valid - 15):
+            c_now = closes_arr[idx_ev]
+            f_now = feats_arr[idx_ev]
+            c_future = closes_arr[idx_ev+1 : idx_ev+15]
+            max_drop = (c_now - np.min(c_future)) / (c_now + 1e-10)
+            max_gain = (np.max(c_future) - c_now) / (c_now + 1e-10)
+            # Целевой сигнал нейросети на выход: 1 если позицию выбивает в просадку
+            target_exit = 1.0 if max_drop > 0.004 and max_gain < 0.002 else 0.0
+            
+            sample_feat = np.append(f_now, [0.0, 0.2]) # pnl=0, order_duration=0.2
+            exit_X_list.append(sample_feat)
+            exit_y_list.append(target_exit)
+            
+        if exit_X_list:
+            ai_exit_model.fit(exit_X_list, exit_y_list, epochs=120, lr=0.05)
+    except Exception as exit_tr_ex:
+        logger.warning(f"Error training ai_exit_model: {exit_tr_ex}")
 
     logger.info(f"✅ Виртуальное обучение завершено! Исходный WR: {best_v_stats['winrate']}% | Проверка (VAL) WR: {val_stat['winrate']}%. Сохраняем...")
     save_models_to_disk(pair, timeframe)
