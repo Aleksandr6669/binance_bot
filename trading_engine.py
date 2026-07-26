@@ -1397,22 +1397,31 @@ def evaluate_market_signal(persist_log=False, place_order=False):
 
             if active_order and use_ai_exit:
                 current_side = active_order["side"].upper()
+                order_created_at = active_order.get("created_at")
+                order_age_sec = 999.0
+                if order_created_at:
+                    try:
+                        o_dt = pd.to_datetime(order_created_at)
+                        order_age_sec = (pd.Timestamp.now() - o_dt).total_seconds()
+                    except Exception:
+                        order_age_sec = 999.0
                 
                 # 1. Прямой разворот тренда ИИ (BUY -> SELL или SELL -> BUY)
                 is_reversal = (action in ["BUY", "SELL"] and action != current_side and not vol_blocked and prob > threshold)
                 
-                # 2. Угасание импульса БЕЗ разворота (flip прогноза DLinear или падение уверенности Классификатора)
+                # 2. Угасание импульса БЕЗ разворота (только при сущностном сдвиге прогноза и возрасте сделки > 30 сек)
                 is_signal_decay = False
-                if current_side == "BUY":
-                    if pred_change_1m < -0.0004 or (prob < 0.42 and action != "BUY"):
-                        is_signal_decay = True
-                        exit_reason_label = "угасание импульса ИИ (без разворота)"
-                elif current_side == "SELL":
-                    if pred_change_1m > 0.0004 or (prob < 0.42 and action != "SELL"):
-                        is_signal_decay = True
-                        exit_reason_label = "угасание импульса ИИ (без разворота)"
+                if order_age_sec >= 30:
+                    if current_side == "BUY":
+                        if pred_change_1m < -0.0020 or (raw_prob < 0.25):
+                            is_signal_decay = True
+                            exit_reason_label = "слом тренда ИИ (прогноз -0.2%)"
+                    elif current_side == "SELL":
+                        if pred_change_1m > 0.0020 or (raw_prob > 0.75):
+                            is_signal_decay = True
+                            exit_reason_label = "слом тренда ИИ (прогноз +0.2%)"
 
-                # 3. Умный ИИ-трейлинг стоп (NumPyTrailingModel на 12 фичах)
+                # 3. Умный ИИ-трейлинг стоп (NumPyTrailingModel на 12 фичах, только при профите)
                 is_ai_trailing_exit = False
                 if use_ai_trailing and not is_reversal and not is_signal_decay:
                     try:
@@ -1421,13 +1430,14 @@ def evaluate_market_signal(persist_log=False, place_order=False):
                         if current_side == "BUY":
                             peak_price = float(active_order.get("peak_price") or entry_price)
                             peak_price = max(peak_price, current_close)
-                            if peak_price > entry_price and (peak_price - current_close) / entry_price >= ai_trail_dist_pct:
+                            # Активируем трейлинг только после достижения начальной прибыли +0.3%
+                            if peak_price >= entry_price * 1.003 and (peak_price - current_close) / entry_price >= ai_trail_dist_pct:
                                 is_ai_trailing_exit = True
                                 exit_reason_label = f"ИИ-трейлинг стоп ({ai_trail_dist_pct*100:.2f}%)"
                         elif current_side == "SELL":
                             trough_price = float(active_order.get("trough_price") or entry_price)
                             trough_price = min(trough_price, current_close)
-                            if trough_price < entry_price and (current_close - trough_price) / entry_price >= ai_trail_dist_pct:
+                            if trough_price <= entry_price * 0.997 and (current_close - trough_price) / entry_price >= ai_trail_dist_pct:
                                 is_ai_trailing_exit = True
                                 exit_reason_label = f"ИИ-трейлинг стоп ({ai_trail_dist_pct*100:.2f}%)"
                     except Exception as trail_ex:
