@@ -451,23 +451,19 @@ def build_dashboard_view(page: ft.Page, lang: str):
         except Exception as ex:
             pass
 
-        # 5. Логи ИИ (Живой расчет в реальном времени из ОЗУ с фолбеком на БД!)
+        # 5. Логи ИИ (ТОЛЬКО 100% Живой расчет в реальном времени из ОЗУ без сохраненных логов!)
         try:
             latest_log = trading_engine.LATEST_LIVE_SIGNAL
-            source_desc = "Live prediction"
             
-            if not latest_log:
-                # Если лога в ОЗУ еще нет — выполняем точечный инференс прямо сейчас
+            # Если сигнала еще нет или он относится к другой паре/таймфрейму — рассчитываем СВЕЖИЙ живой сигнал прямо сейчас
+            if not latest_log or latest_log.get("pair") != pair or latest_log.get("timeframe") != timeframe:
                 try:
                     await asyncio.to_thread(trading_engine.evaluate_market_signal, False, False)
                     latest_log = trading_engine.LATEST_LIVE_SIGNAL
-                except Exception:
-                    pass
+                except Exception as eval_ex:
+                    print(f"Live evaluation exception: {eval_ex}")
             
-            if not latest_log:
-                # Фолбек на последний сохраненный лог из базы данных при сетевой задержке
-                latest_log = db.get_latest_analysis_log(pair, timeframe)
-                source_desc = "Saved prediction"
+            source_desc = "Live prediction"
             
             if latest_log:
                 ml_logs_stage1.value = latest_log.get("stage1_output") or "—"
