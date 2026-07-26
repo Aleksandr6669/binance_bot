@@ -142,6 +142,7 @@ def init_db():
         stage1_output TEXT,
         stage2_output TEXT,
         stage3_output TEXT,
+        timeframe TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     ''')
@@ -160,6 +161,12 @@ def init_db():
         cursor.execute("SELECT close_price FROM orders LIMIT 1")
     except sqlite3.OperationalError:
         cursor.execute("ALTER TABLE orders ADD COLUMN close_price REAL")
+
+    # Migration: check if timeframe exists in analysis_logs table
+    try:
+        cursor.execute("SELECT timeframe FROM analysis_logs LIMIT 1")
+    except sqlite3.OperationalError:
+        cursor.execute("ALTER TABLE analysis_logs ADD COLUMN timeframe TEXT")
         
     conn.commit()
     conn.close()
@@ -198,7 +205,7 @@ def get_settings():
     conn.close()
     return dict(settings) if settings else None
 
-def save_settings(trading_pair, timeframe, order_size_usdt, bot_enabled, trading_mode, market_type="SPOT", futures_leverage=10, min_probability_threshold=0.88, invert_signal=0, bot_started_at=None, use_limit_orders=1, use_trailing_stop=1, use_ai_limit_price=0, trailing_activation_pct=0.5, trailing_step_pct=0.2, use_ai_exit=0, use_ai_trailing=0, daily_loss_limit=0.0, daily_profit_target=0.0, limit_offset_pct=1.0):
+def save_settings(trading_pair, timeframe, order_size_usdt, bot_enabled, trading_mode, market_type="SPOT", futures_leverage=10, min_probability_threshold=0.65, invert_signal=0, bot_started_at=None, use_limit_orders=1, use_trailing_stop=1, use_ai_limit_price=0, trailing_activation_pct=0.5, trailing_step_pct=0.2, use_ai_exit=0, use_ai_trailing=0, daily_loss_limit=0.0, daily_profit_target=0.0, limit_offset_pct=1.0):
     conn = get_db_connection()
     conn.execute(
         '''UPDATE settings SET trading_pair = ?, timeframe = ?, order_size_usdt = ?, bot_enabled = ?, trading_mode = ?, market_type = ?, futures_leverage = ?, min_probability_threshold = ?, invert_signal = ?, bot_started_at = ?, use_limit_orders = ?, use_trailing_stop = ?, use_ai_limit_price = ?, trailing_activation_pct = ?, trailing_step_pct = ?, use_ai_exit = ?, use_ai_trailing = ?, daily_loss_limit = ?, daily_profit_target = ?, limit_offset_pct = ? WHERE id = 1''',
@@ -341,22 +348,28 @@ def update_order_sl(order_id, new_stop_loss):
     conn.close()
     upload_db_to_hf_async()
 
-def add_analysis_log(pair, indicators_summary, stage1, stage2, stage3):
+def add_analysis_log(pair, indicators_summary, stage1, stage2, stage3, timeframe=None):
     conn = get_db_connection()
     conn.execute(
-        '''INSERT INTO analysis_logs (pair, indicators_summary, stage1_output, stage2_output, stage3_output)
-           VALUES (?, ?, ?, ?, ?)''',
-        (pair, indicators_summary, stage1, stage2, stage3)
+        '''INSERT INTO analysis_logs (pair, indicators_summary, stage1_output, stage2_output, stage3_output, timeframe)
+           VALUES (?, ?, ?, ?, ?, ?)''',
+        (pair, indicators_summary, stage1, stage2, stage3, timeframe)
     )
     conn.commit()
     conn.close()
 
-def get_latest_analysis_log(pair):
+def get_latest_analysis_log(pair, timeframe=None):
     conn = get_db_connection()
-    log = conn.execute(
-        "SELECT * FROM analysis_logs WHERE pair = ? ORDER BY created_at DESC LIMIT 1",
-        (pair,)
-    ).fetchone()
+    if timeframe:
+        log = conn.execute(
+            "SELECT * FROM analysis_logs WHERE pair = ? AND (timeframe = ? OR timeframe IS NULL) ORDER BY created_at DESC LIMIT 1",
+            (pair, timeframe)
+        ).fetchone()
+    else:
+        log = conn.execute(
+            "SELECT * FROM analysis_logs WHERE pair = ? ORDER BY created_at DESC LIMIT 1",
+            (pair,)
+        ).fetchone()
     conn.close()
     return dict(log) if log else None
 
@@ -370,10 +383,10 @@ def get_all_analysis_logs():
 
 
 
-def should_persist_analysis_log(pair, stage3_output, min_interval_seconds=30):
+def should_persist_analysis_log(pair, stage3_output, min_interval_seconds=30, timeframe=None):
     import json
     from datetime import datetime
-    latest = get_latest_analysis_log(pair)
+    latest = get_latest_analysis_log(pair, timeframe=timeframe)
     if not latest:
         return True
     
@@ -399,9 +412,9 @@ def should_persist_analysis_log(pair, stage3_output, min_interval_seconds=30):
         
     return True
 
-def add_analysis_log_if_needed(pair, indicators_summary, stage1, stage2, stage3, min_interval_seconds=30):
-    if should_persist_analysis_log(pair, stage3, min_interval_seconds=min_interval_seconds):
-        add_analysis_log(pair, indicators_summary, stage1, stage2, stage3)
+def add_analysis_log_if_needed(pair, indicators_summary, stage1, stage2, stage3, min_interval_seconds=30, timeframe=None):
+    if should_persist_analysis_log(pair, stage3, min_interval_seconds=min_interval_seconds, timeframe=timeframe):
+        add_analysis_log(pair, indicators_summary, stage1, stage2, stage3, timeframe=timeframe)
 
 def update_settings(key, value):
     conn = get_db_connection()
@@ -479,7 +492,7 @@ def get_filtered_orders(pair=None, trading_mode=None, side=None, status=None, op
     conn.close()
     return [dict(row) for row in rows]
 
-def get_filtered_analysis_logs(pair=None, date=None, tz_offset_min=None):
+def get_filtered_analysis_logs(pair=None, date=None, timeframe=None, tz_offset_min=None):
     """
     date: локальная дата пользователя 'YYYY-MM-DD'.
     tz_offset_min: смещение часового пояса в минутах от UTC.
@@ -495,6 +508,9 @@ def get_filtered_analysis_logs(pair=None, date=None, tz_offset_min=None):
     if pair:
         query += " AND pair = ?"
         params.append(pair)
+    if timeframe:
+        query += " AND (timeframe = ? OR timeframe IS NULL)"
+        params.append(timeframe)
     if date:
         try:
             user_tz = datetime.timezone(datetime.timedelta(minutes=tz_offset_min))

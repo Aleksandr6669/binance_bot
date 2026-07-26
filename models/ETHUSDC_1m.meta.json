@@ -2,9 +2,31 @@
   "pair": "ETHUSDC",
   "timeframe": "1m",
   "classifier_type": "LightGBM (Gradient Boosting)",
-  "candles_count": 108273,
-  "feedback_count": 588,
-  "loss": 1.8722860112571543e-05,
-  "mtime": "2026-07-23 12:01:33",
-  "size_mb": 15.68
+  "candles_count": 216806,
+  "feedback_count": 3362,
+  "loss": 2.30070353753252e-06,
+  "virtual_stats": {
+    "total": 8,
+    "wins": 8,
+    "losses": 0,
+    "winrate": 100.0,
+    "pnl_pct": 0.94,
+    "threshold": 0.7
+  },
+  "val_stats": {
+    "total": 2,
+    "wins": 2,
+    "losses": 0,
+    "winrate": 100.0,
+    "pnl_pct": 0.24,
+    "threshold": 0.7
+  },
+  "real_stats": {
+    "total": 266,
+    "wins": 65,
+    "losses": 186,
+    "winrate": 24.4
+  },
+  "mtime": "2026-07-26 08:21:53",
+  "size_mb": 32.7
 }

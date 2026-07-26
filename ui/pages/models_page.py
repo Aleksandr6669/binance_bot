@@ -114,12 +114,20 @@ def build_models_view(page: ft.Page, lang: str):
             loss_str = f"{loss_val:.6f}" if loss_val is not None else "0.000016"
             
             v_st = m.get("virtual_stats") or {}
+            val_st = m.get("val_stats") or {}
             r_st = m.get("real_stats") or {}
 
             v_tot = v_st.get("total", 0)
             v_w = v_st.get("wins", 0)
             v_l = v_st.get("losses", 0)
             v_wr = v_st.get("winrate", 0.0)
+
+            val_tot = val_st.get("total", 0)
+            val_w = val_st.get("wins", 0)
+            val_l = val_st.get("losses", max(0, val_tot - val_w))
+            val_wr = val_st.get("winrate", 0.0)
+            val_pnl = val_st.get("pnl_pct", 0.0)
+            val_thresh = val_st.get("threshold", 0.65)
 
             r_tot = r_st.get("total", 0)
             r_w = r_st.get("wins", 0)
@@ -142,18 +150,31 @@ def build_models_view(page: ft.Page, lang: str):
                 visible=is_active
             )
 
+            async def poll_progress(t_key):
+                try:
+                    while t_key in active_tasks or scalping_ensemble.get_training_status().get("active"):
+                        st = scalping_ensemble.get_training_status()
+                        if st and st.get("active") and st.get("msg"):
+                            active_tasks[t_key] = st["msg"]
+                        refresh_models_list()
+                        await asyncio.sleep(0.5)
+                except asyncio.CancelledError:
+                    pass
+
             # Button callbacks bound to pair and tf
             def make_retrain_handler(p=pair, t_frame=tf):
                 async def retrain_action(e):
                     t_key = f"{p}_{t_frame}"
-                    active_tasks[t_key] = f"Обучение с нуля {p} ({t_frame}): псевдоторговля, проверка TP/SL, отступы лимиток и ИИ-трейлинг..." if lang == "ru" else f"Retraining {p} ({t_frame}) from scratch..."
+                    active_tasks[t_key] = f"Запуск обучения {p} ({t_frame})..."
                     refresh_models_list()
+                    poll_task = asyncio.create_task(poll_progress(t_key))
                     try:
                         res = await asyncio.to_thread(scalping_ensemble.bootstrap_virtual_training, p, t_frame)
                         show_toast(f"Модель {p} ({t_frame}) успешно переобучена с нуля!" if lang == "ru" else f"Model {p} ({t_frame}) retrained successfully!")
                     except Exception as ex:
                         show_toast(f"Ошибка переобучения: {ex}", color=RED_COLOR)
                     finally:
+                        poll_task.cancel()
                         active_tasks.pop(t_key, None)
                         refresh_models_list()
                 return retrain_action
@@ -161,14 +182,16 @@ def build_models_view(page: ft.Page, lang: str):
             def make_finetune_handler(p=pair, t_frame=tf):
                 async def finetune_action(e):
                     t_key = f"{p}_{t_frame}"
-                    active_tasks[t_key] = f"Дообучение (RL) модели {p} ({t_frame}) на закрытых ордерах и логах..." if lang == "ru" else f"Fine-tuning {p} ({t_frame}) model..."
+                    active_tasks[t_key] = f"Запуск дообучения {p} ({t_frame})..."
                     refresh_models_list()
+                    poll_task = asyncio.create_task(poll_progress(t_key))
                     try:
-                        res = await asyncio.to_thread(scalping_ensemble.adapt_models_to_closed_orders, p, t_frame)
+                        res = await asyncio.to_thread(scalping_ensemble.retrain_on_market_history, p, t_frame)
                         show_toast(f"Модель {p} ({t_frame}) дообучена на обратной связи!" if lang == "ru" else f"Model {p} ({t_frame}) fine-tuned successfully!")
                     except Exception as ex:
                         show_toast(f"Ошибка дообучения: {ex}", color=RED_COLOR)
                     finally:
+                        poll_task.cancel()
                         active_tasks.pop(t_key, None)
                         refresh_models_list()
                 return finetune_action
@@ -286,13 +309,13 @@ def build_models_view(page: ft.Page, lang: str):
 
                     ft.Divider(color=ft.Colors.with_opacity(0.06, "#ffffff"), height=6),
 
-                    # Trades Stats Row (Virtual vs Real/Demo)
+                    # Trades Stats Row (Virtual vs Validation vs Real/Demo)
                     ft.ResponsiveRow([
                         # Column 1: Virtual Trades (Bootstrap simulation)
                         ft.Column([
                             ft.Row([
                                 ft.Icon(ft.Icons.AUTO_GRAPH_ROUNDED, size=11, color=GOLD_COLOR),
-                                ft.Text("ВИРТУАЛЬНЫЕ СДЕЛКИ (BOOTSTRAP)", size=9, color="#94a3b8", weight=ft.FontWeight.BOLD)
+                                ft.Text("ВИРТУАЛЬНЫЕ СДЕЛКИ", size=9, color="#94a3b8", weight=ft.FontWeight.BOLD)
                             ], spacing=3),
                             ft.Row([
                                 ft.Text(f"{v_tot} всего", size=11, weight=ft.FontWeight.BOLD, color="#f8fafc"),
@@ -305,9 +328,28 @@ def build_models_view(page: ft.Page, lang: str):
                                     border=ft.Border.all(1, ft.Colors.with_opacity(0.3, GOLD_COLOR))
                                 )
                             ], spacing=5, vertical_alignment=ft.CrossAxisAlignment.CENTER)
-                        ], spacing=1, col={"xs": 12, "md": 6}),
+                        ], spacing=1, col={"xs": 12, "md": 4}),
 
-                        # Column 2: Real / Demo Trading Orders
+                        # Column 2: Out-of-Sample Test Trading Accuracy (Val WinRate)
+                        ft.Column([
+                            ft.Row([
+                                ft.Icon(ft.Icons.VERIFIED_ROUNDED, size=11, color="#10b981"),
+                                ft.Text("ТЕСТОВАЯ ТОРГОВЛЯ (VAL 20%)" if lang == "ru" else "TEST TRADING (VAL 20%)", size=9, color="#94a3b8", weight=ft.FontWeight.BOLD)
+                            ], spacing=3),
+                            ft.Row([
+                                ft.Text(f"{val_tot} всего", size=11, weight=ft.FontWeight.BOLD, color="#f8fafc"),
+                                ft.Text(f"({val_w} 🟢 | {val_l} 🔴)", size=11, color="#cbd5e1"),
+                                ft.Container(
+                                    content=ft.Text(f"WR {val_wr:.1f}%", size=9, weight=ft.FontWeight.BOLD, color="#10b981"),
+                                    padding=ft.Padding.symmetric(vertical=1, horizontal=4),
+                                    border_radius=4,
+                                    bgcolor=ft.Colors.with_opacity(0.12, "#10b981"),
+                                    border=ft.Border.all(1, ft.Colors.with_opacity(0.3, "#10b981"))
+                                )
+                            ], spacing=5, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+                        ], spacing=1, col={"xs": 12, "md": 4}),
+
+                        # Column 3: Real / Demo Trading Orders
                         ft.Column([
                             ft.Row([
                                 ft.Icon(ft.Icons.RECEIPT_LONG_ROUNDED, size=11, color="#38bdf8"),
@@ -324,7 +366,7 @@ def build_models_view(page: ft.Page, lang: str):
                                     border=ft.Border.all(1, ft.Colors.with_opacity(0.3, "#38bdf8"))
                                 )
                             ], spacing=5, vertical_alignment=ft.CrossAxisAlignment.CENTER)
-                        ], spacing=1, col={"xs": 12, "md": 6})
+                        ], spacing=1, col={"xs": 12, "md": 4})
                     ], spacing=6),
 
                     ft.Divider(color=ft.Colors.with_opacity(0.06, "#ffffff"), height=6),
@@ -391,7 +433,11 @@ def build_models_view(page: ft.Page, lang: str):
 
         try:
             await asyncio.to_thread(scalping_ensemble.bootstrap_virtual_training, new_pair, new_tf)
-            show_toast(f"Новая модель для {new_pair} ({new_tf}) успешно создана и обучена!" if lang == "ru" else f"New model for {new_pair} ({new_tf}) successfully created!")
+            # Сразу после bootstrap — дообучаем на реальных ордерах из БД
+            active_tasks[t_key] = f"Дообучение (RL) на реальных ордерах {new_pair} ({new_tf})..." if lang == "ru" else f"Fine-tuning {new_pair} ({new_tf}) on real orders..."
+            refresh_models_list()
+            await asyncio.to_thread(scalping_ensemble.retrain_on_market_history, new_pair, new_tf)
+            show_toast(f"Модель {new_pair} ({new_tf}) создана и дообучена на реальных ордерах!" if lang == "ru" else f"Model {new_pair} ({new_tf}) created & fine-tuned on real orders!", color="#10b981")
         except Exception as ex:
             show_toast(f"Ошибка создания модели: {ex}", color=RED_COLOR)
         finally:

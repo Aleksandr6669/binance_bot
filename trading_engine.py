@@ -801,7 +801,7 @@ def handle_post_trade_learning(pair, timeframe, pnl):
 # 3. ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
 # =====================================================================
 def fetch_binance_klines(symbol, timeframe, limit=100, market_type="SPOT"):
-    """Запрашивает публичную историю свечей с Binance API (Spot или Futures) с кешированием."""
+    """Запрашивает публичную историю свечей с Binance API с автоматической пагинацией для глубокого бутстрапа (>1000 свечей)."""
     symbol = symbol.upper()
     market_type = market_type.upper()
     
@@ -809,31 +809,58 @@ def fetch_binance_klines(symbol, timeframe, limit=100, market_type="SPOT"):
     now = time.time()
     if cache_key in _klines_cache:
         cached_time, cached_data = _klines_cache[cache_key]
-        if now - cached_time < 1.0:
+        if now - cached_time < 2.0:
             return cached_data
             
     use_us = os.environ.get("USE_BINANCE_US", "False").lower() == "true"
     url = "https://fapi.binance.com/fapi/v1/klines" if market_type == "FUTURES" else (
         "https://api.binance.us/api/v3/klines" if use_us else "https://api.binance.com/api/v3/klines"
     )
-    params = {
-        "symbol": symbol,
-        "interval": timeframe,
-        "limit": limit
-    }
-    try:
-        res = requests.get(url, params=params, timeout=10, proxies=get_binance_proxies())
-        res.raise_for_status()
-        data = res.json()
-        _klines_cache[cache_key] = (now, data)
-        return data
-    except Exception as e:
-        print(f"Error fetching klines for {symbol} ({market_type}): {e}")
-        # Search for any cached data for this symbol, timeframe, and market_type
-        for k_key, val in _klines_cache.items():
-            if k_key[0] == symbol and k_key[1] == timeframe and k_key[3] == market_type:
-                return val[1]
-        raise e
+    
+    all_klines = []
+    end_time = None
+    remaining = limit
+
+    while remaining > 0:
+        fetch_limit = min(1000, remaining)
+        params = {
+            "symbol": symbol,
+            "interval": timeframe,
+            "limit": fetch_limit
+        }
+        if end_time:
+            params["endTime"] = end_time
+            
+        try:
+            res = requests.get(url, params=params, timeout=10, proxies=get_binance_proxies())
+            res.raise_for_status()
+            data = res.json()
+            if not data:
+                break
+                
+            if all_klines:
+                data = [k for k in data if k[0] < all_klines[0][0]]
+                if not data:
+                    break
+                    
+            all_klines = data + all_klines
+            remaining -= len(data)
+            end_time = data[0][0] - 1
+            if len(data) < fetch_limit or fetch_limit < 1000:
+                break
+        except Exception as e:
+            if all_klines:
+                break
+            print(f"Error fetching klines for {symbol} ({market_type}): {e}")
+            for k_key, val in _klines_cache.items():
+                if k_key[0] == symbol and k_key[1] == timeframe and k_key[3] == market_type:
+                    return val[1]
+            raise e
+
+    if all_klines:
+        _klines_cache[cache_key] = (now, all_klines)
+        return all_klines
+    return []
 
 def fetch_current_price(symbol, market_type="SPOT"):
     """Запрашивает текущую тикерную цену с Binance API (Spot или Futures) с кешированием на 1.0 секунду."""
@@ -926,7 +953,7 @@ def get_ai_trailing_distance_pct(pair, timeframe, market_type):
             "cvd": np.random.normal(0, 50.0)
         } for k in klines])
 
-        df = scalping_ensemble.calculate_indicators(df)
+        df = scalping_ensemble.calculate_indicators(df, timeframe=timeframe)
         current_row = df.iloc[-1]
         
         # DLinear prediction
@@ -956,7 +983,10 @@ def get_ai_trailing_distance_pct(pair, timeframe, market_type):
             pred_change_2m,
             current_hour,
             current_row.get("vwap_dist", 0.0),
-            current_row.get("macd_hist_norm", 0.0)
+            current_row.get("macd_hist_norm", 0.0),
+            current_row.get("bb_dist", 0.5),
+            current_row.get("vol_surge", 1.0),
+            current_row.get("wick_ratio", 0.0)
         ])
         
         # Predict dynamic percentage (e.g. standard deviation)
@@ -1019,7 +1049,7 @@ def run_user_scalping_cycle():
         } for k in klines])
         
         # Считаем индикаторы
-        df = scalping_ensemble.calculate_indicators(df)
+        df = scalping_ensemble.calculate_indicators(df, timeframe=timeframe)
         
         current_row = df.iloc[-1]
         current_close = current_row["close"]
@@ -1070,7 +1100,10 @@ def run_user_scalping_cycle():
             pred_change_2m,
             current_hour,
             current_row.get("vwap_dist", 0.0),
-            current_row.get("macd_hist_norm", 0.0)
+            current_row.get("macd_hist_norm", 0.0),
+            current_row.get("bb_dist", 0.5),
+            current_row.get("vol_surge", 1.0),
+            current_row.get("wick_ratio", 0.0)
         ]])
         
         prob = scalping_ensemble.classifier_model.predict(features)[0]
@@ -1109,7 +1142,8 @@ def run_user_scalping_cycle():
                 stage1=stage1_out,
                 stage2=stage2_out,
                 stage3=stage3_out,
-                min_interval_seconds=30
+                min_interval_seconds=30,
+                timeframe=timeframe
             )
         except Exception as e:
             print(f"Failed to persist analysis log (non-fatal): {e}")
@@ -1203,10 +1237,6 @@ def evaluate_market_signal(persist_log=False, place_order=False):
 
     try:
         klines = fetch_binance_klines(pair, timeframe, limit=100, market_type=market_type)
-        if klines:
-            last_k = klines[-1]
-            db.save_market_candle(pair, timeframe, last_k[0], last_k[1], last_k[2], last_k[3], last_k[4], last_k[5])
-
         df = pd.DataFrame([{
             "time": k[0],
             "open": float(k[1]),
@@ -1214,11 +1244,9 @@ def evaluate_market_signal(persist_log=False, place_order=False):
             "low": float(k[3]),
             "close": float(k[4]),
             "volume": float(k[5]),
-            "obi": np.clip(np.random.normal(0, 0.1), -1.0, 1.0),
-            "cvd": np.random.normal(0, 50.0)
         } for k in klines])
 
-        df = scalping_ensemble.calculate_indicators(df)
+        df = scalping_ensemble.calculate_indicators(df, timeframe=timeframe)
 
         current_row = df.iloc[-1]
         current_close = current_row["close"]
@@ -1232,27 +1260,8 @@ def evaluate_market_signal(persist_log=False, place_order=False):
         mean_hourly_atr = df["atr"].iloc[-hour_window:].mean()
         vol_blocked = current_atr > 4.0 * mean_hourly_atr
 
-        trend_direction = "UP"
-        mtf_map = {
-            "1m": "5m",
-            "3m": "15m",
-            "5m": "15m",
-            "15m": "1h",
-            "30m": "2h",
-            "1h": "4h",
-            "4h": "1d"
-        }
-        trend_tf = mtf_map.get(timeframe, timeframe)
-        try:
-            klines_trend = fetch_binance_klines(pair, trend_tf, limit=500, market_type=market_type)
-            if len(klines_trend) >= 50:
-                closes_trend = pd.Series([float(k[4]) for k in klines_trend])
-                ema_50 = closes_trend.ewm(span=50, adjust=False).mean().iloc[-1]
-                last_close_val = closes_trend.iloc[-1]
-                if last_close_val < ema_50:
-                    trend_direction = "DOWN"
-        except Exception as te:
-            print(f"Error calculating EMA 50 trend filter: {te}")
+        trend_direction = current_row.get("trend_direction", "UP")
+        ema_span = scalping_ensemble.get_adaptive_ema_span(timeframe)
 
         closes_60 = df["close"].iloc[-60:].values
         last_close = closes_60[-1]
@@ -1288,10 +1297,14 @@ def evaluate_market_signal(persist_log=False, place_order=False):
             pred_change_2m,
             current_hour,
             current_row.get("vwap_dist", 0.0),
-            current_row.get("macd_hist_norm", 0.0)
+            current_row.get("macd_hist_norm", 0.0),
+            current_row.get("bb_dist", 0.5),
+            current_row.get("vol_surge", 1.0),
+            current_row.get("wick_ratio", 0.0)
         ]])
 
-        prob = float(scalping_ensemble.classifier_model.predict(features)[0])
+        raw_prob = float(scalping_ensemble.classifier_model.predict(features)[0])
+        prob = scalping_ensemble.calibrate_probability(raw_prob)
         raw_thresh = dict(settings).get("min_probability_threshold")
         threshold = float(raw_thresh) if raw_thresh is not None else 0.65
         invert_signal = bool(dict(settings).get("invert_signal", 0))
@@ -1319,7 +1332,7 @@ def evaluate_market_signal(persist_log=False, place_order=False):
             reason += " Сигнал инвертирован"
 
         indicators_str = f"RSI: {current_rsi_norm * 100:.1f}, ATR%: {current_atr_pct * 100:.4f}%, Trend: {trend_direction}"
-        trend_desc = f"EMA 50 ({trend_tf} MTF)" if trend_tf != timeframe else f"EMA 50 ({timeframe})"
+        trend_desc = f"EMA {ema_span} ({timeframe})"
         stage1_out = f"{timeframe} Scalping Analysis.\nVolatility Filter: {'BLOCKED' if vol_blocked else 'OK'}\nHourly Average ATR: {mean_hourly_atr:.4f}\nCurrent ATR: {current_atr:.4f}\n{trend_desc} Trend Filter: {trend_direction}"
         stage2_out = f"DLinear Predictions:\n- t+1 Close Change: {pred_change_1m * 100:+.4f}%\n- t+2 Close Change: {pred_change_2m * 100:+.4f}%\n\nClassifier Success Probability: {prob * 100:.2f}%"
 
@@ -1348,7 +1361,8 @@ def evaluate_market_signal(persist_log=False, place_order=False):
                     stage1=stage1_out,
                     stage2=stage2_out,
                     stage3=stage3_out,
-                    min_interval_seconds=30
+                    min_interval_seconds=30,
+                    timeframe=timeframe
                 )
             except Exception as e:
                 print(f"Failed to persist analysis log (non-fatal): {e}")

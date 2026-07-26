@@ -2,9 +2,28 @@
   "pair": "SOLUSDC",
   "timeframe": "1m",
   "classifier_type": "LightGBM (Gradient Boosting)",
-  "candles_count": 30022,
-  "feedback_count": 125,
-  "loss": 7.309045150716257e-06,
-  "mtime": "2026-07-23 12:02:02",
-  "size_mb": 4.42
+  "candles_count": 35515,
+  "feedback_count": 153,
+  "loss": 1.626305451856625e-05,
+  "virtual_stats": {
+    "total": 358,
+    "wins": 202,
+    "losses": 156,
+    "winrate": 56.4,
+    "threshold": 0.45
+  },
+  "val_stats": {
+    "total": 19,
+    "wins": 9,
+    "winrate": 47.4,
+    "threshold": 0.45
+  },
+  "real_stats": {
+    "total": 44,
+    "wins": 5,
+    "losses": 23,
+    "winrate": 11.4
+  },
+  "mtime": "2026-07-25 01:04:26",
+  "size_mb": 5.16
 }

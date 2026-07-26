@@ -1,0 +1,22 @@
+{
+  "pair": "SOLUSDC",
+  "timeframe": "30m",
+  "classifier_type": "LightGBM (Gradient Boosting)",
+  "candles_count": 429,
+  "feedback_count": 153,
+  "loss": 0.00020290113451935666,
+  "virtual_stats": {
+    "total": 346,
+    "wins": 315,
+    "losses": 31,
+    "winrate": 91.0
+  },
+  "real_stats": {
+    "total": 44,
+    "wins": 5,
+    "losses": 23,
+    "winrate": 11.4
+  },
+  "mtime": "2026-07-23 14:19:19",
+  "size_mb": 0.22
+}

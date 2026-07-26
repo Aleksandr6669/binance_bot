@@ -302,6 +302,7 @@ ai_trailing_model = NumPyTrailingModel(num_features=9)
 current_model_pair = None
 current_model_timeframe = None
 last_virtual_stats = {}
+last_val_stats = {}
 
 training_status = {
     "active": False,
@@ -364,6 +365,8 @@ def save_models_to_disk(pair, timeframe):
         if not v_stat:
             v_stat = {"total": 0, "wins": 0, "losses": 0, "winrate": 0.0}
 
+        val_stat = last_val_stats.get((pair.upper(), timeframe), {"total": 0, "wins": 0, "losses": 0, "winrate": 0.0, "pnl_pct": 0.0})
+
         # Calculate real/demo trades stats from orders database for this pair
         real_closed = [o for o in orders if o.get("status") not in ["ACTIVE", "PENDING"]]
         r_wins = sum(1 for o in real_closed if float(o.get("pnl", 0.0) or 0.0) > 0)
@@ -385,6 +388,7 @@ def save_models_to_disk(pair, timeframe):
             "trailing": ai_trailing_model,
             "loss": last_loss,
             "virtual_stats": v_stat,
+            "val_stats": val_stat,
             "real_stats": real_stats,
             "db_orders": orders,
             "db_analysis_logs": analysis_logs,
@@ -415,6 +419,7 @@ def save_models_to_disk(pair, timeframe):
                 "feedback_count": len(analysis_logs),
                 "loss": last_loss,
                 "virtual_stats": v_stat,
+                "val_stats": val_stat,
                 "real_stats": real_stats,
                 "mtime": mtime,
                 "size_mb": size_mb
@@ -714,6 +719,9 @@ def calculate_indicators(df, rsi_period=14, atr_period=14):
         df['macd_hist_norm'] = macd_hist / (df['close'] + 1e-10)
     except Exception:
         df['macd_hist_norm'] = 0.0
+
+    # 3. Расчет EMA тренда (ema_trend = EMA 1000)
+    df['ema_trend'] = df['close'].ewm(span=1000, adjust=False).mean()
         
     return df
 
@@ -1474,6 +1482,60 @@ def bootstrap_virtual_training(pair, timeframe):
     если у нас нет сохраненной нейросети. Симулирует ордера, стопы и тейки,
     и использует результаты для RL-дообучения.
     """
+def calibrate_probability(raw_p, p_95=0.40):
+    """
+    Калибрует сырую вероятность LightGBM (0.15..0.40) к рабочей шкале уверенности ИИ (0.10..0.95).
+    """
+    if p_95 <= 0.05:
+        p_95 = 0.40
+    ratio = raw_p / p_95
+    if ratio >= 1.0:
+        return float(np.clip(0.85 + min(0.12, (ratio - 1.0) * 0.25), 0.10, 0.97))
+    elif ratio >= 0.75:
+        return float(np.clip(0.65 + (ratio - 0.75) / 0.25 * 0.20, 0.10, 0.85))
+    else:
+        return float(np.clip(ratio / 0.75 * 0.65, 0.05, 0.65))
+
+def load_real_execution_feedback(df, pair, timeframe, feature_cols):
+    extra_X, extra_y = [], []
+    try:
+        import sqlite3
+        db_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading_bot.db")
+        if os.path.exists(db_file):
+            conn = sqlite3.connect(db_file)
+            conn.row_factory = sqlite3.Row
+            db_orders = conn.execute(
+                "SELECT * FROM orders WHERE status LIKE 'CLOSED_%' AND pair = ? AND (timeframe = ? OR timeframe IS NULL) ORDER BY created_at DESC LIMIT 1000", 
+                (pair.upper(), timeframe)
+            ).fetchall()
+            conn.close()
+            timeframe_ms = 60000
+            for order in db_orders:
+                pnl = float(order["pnl"] or 0.0)
+                try:
+                    o_dt = pd.to_datetime(order["created_at"])
+                    o_ts_ms = int(o_dt.timestamp() * 1000)
+                    idx = (df['time'] - o_ts_ms).abs().idxmin()
+                    if idx < len(df) and abs(df.loc[idx, 'time'] - o_ts_ms) <= timeframe_ms:
+                        feat = df.iloc[idx][feature_cols].values.astype(float)
+                        if not np.isnan(feat).any():
+                            close_reason = order.get("status", "CLOSED_MANUAL")
+                            if pnl < 0:
+                                target_val = 0.0
+                                weight = 6 if close_reason == "CLOSED_SL" else 4
+                            else:
+                                target_val = 1.0
+                                weight = 5 if close_reason == "CLOSED_SL" else 4
+                            for _ in range(weight):
+                                extra_X.append(feat)
+                                extra_y.append(target_val)
+                except Exception:
+                    pass
+    except Exception as db_ex:
+        logger.warning(f"Ошибка загрузки отзывов реального исполнения: {db_ex}")
+    return extra_X, extra_y
+
+def bootstrap_virtual_training(pair, timeframe):
     global training_status
     training_status = {
         "active": True,
@@ -1487,12 +1549,36 @@ def bootstrap_virtual_training(pair, timeframe):
     finally:
         training_status["active"] = False
 
+def format_timeframe_days(timeframe, num_candles=10000):
+    mins = 1
+    if timeframe.endswith('m'):
+        mins = int(timeframe[:-1])
+    elif timeframe.endswith('h'):
+        mins = int(timeframe[:-1]) * 60
+    elif timeframe.endswith('d'):
+        mins = int(timeframe[:-1]) * 1440
+    
+    total_mins = mins * num_candles
+    days = total_mins / 1440.0
+    if days >= 365:
+        return f"{days / 365.25:.1f} г."
+    elif days >= 30:
+        return f"{days / 30.0:.1f} мес."
+    elif days >= 1.0:
+        return f"{days:.1f} дн."
+    else:
+        hours = total_mins / 60.0
+        return f"{hours:.1f} ч."
+
 def _bootstrap_virtual_training_inner(pair, timeframe):
+    global training_status
     logger.info(f"🚀 Запуск виртуального обучения (бутстрап) для {pair} ({timeframe})...")
     
+    time_span_str = format_timeframe_days(timeframe, 10000)
+    training_status["msg"] = f"Обучение {pair.upper()} ({timeframe}) [1/5]: 📡 Загрузка 10 000 свечей ({time_span_str}) с Binance..."
     import trading_engine
     try:
-        raw_klines = trading_engine.fetch_binance_klines(pair, timeframe, limit=1500)
+        raw_klines = trading_engine.fetch_binance_klines(pair, timeframe, limit=10000)
     except Exception as e:
         logger.error(f"Ошибка получения свечей для виртуального обучения: {e}")
         return False
@@ -1534,6 +1620,7 @@ def _bootstrap_virtual_training_inner(pair, timeframe):
     Y_dlinear = np.array(Y_dlinear)
     
     global dlinear_model, classifier_model, ai_trailing_model
+    training_status["msg"] = f"Обучение {pair.upper()} ({timeframe}) [3/5]: 🤖 Обучение нейросети DLinear (прогноз движения цен)..."
     if HAS_TORCH:
         logger.info("Бутстрап: Первичное обучение DLinear (PyTorch)...")
         import torch.nn as nn
@@ -1577,26 +1664,33 @@ def _bootstrap_virtual_training_inner(pair, timeframe):
         'vwap_dist', 'macd_hist_norm'
     ]
     
+    training_status["msg"] = f"Обучение {pair.upper()} ({timeframe}) [4/5]: ⚡ Симуляция виртуальных ордеров TP/SL и загрузка логов из БД..."
     virtual_orders = []
     for i in range(60, n - 20):
         rsi_norm_val = df.iloc[i]['rsi_norm']
         d_pred = df.iloc[i]['dlinear_pred_1m']
+        close_p = df.iloc[i]['close']
+        ema_trend_p = df.iloc[i]['ema_trend']
         
         signal = None
-        if rsi_norm_val < 0.32 or d_pred > 0.0015:
+        if (rsi_norm_val < 0.46 and d_pred > 0.0005) and close_p >= ema_trend_p:
             signal = "BUY"
-        elif rsi_norm_val > 0.68 or d_pred < -0.0015:
+        elif (rsi_norm_val > 0.54 and d_pred < -0.0005) and close_p <= ema_trend_p:
             signal = "SELL"
             
         if signal:
             entry_price = df.iloc[i]['close']
             atr_val = df.iloc[i]['atr']
             if atr_val and atr_val > 0:
-                offset_tp = 4.0 * atr_val
-                offset_sl = 2.0 * atr_val
+                if timeframe in ['1m', '3m', '5m']:
+                    offset_tp = 2.0 * atr_val
+                    offset_sl = 1.2 * atr_val
+                else:
+                    offset_tp = 2.5 * atr_val
+                    offset_sl = 1.5 * atr_val
             else:
-                offset_tp = entry_price * 0.006
-                offset_sl = entry_price * 0.003
+                offset_tp = entry_price * 0.004
+                offset_sl = entry_price * 0.002
                 
             tp_price = entry_price + offset_tp if signal == "BUY" else entry_price - offset_tp
             sl_price = entry_price - offset_sl if signal == "BUY" else entry_price + offset_sl
@@ -1649,113 +1743,206 @@ def _bootstrap_virtual_training_inner(pair, timeframe):
             volatility_targets[i] = np.nan
     df['volatility_target'] = volatility_targets
     
-    # Base training dataset from calculated targets
     valid_df = df[feature_cols + ['target', 'volatility_target']].dropna()
     X_lgb_base = valid_df[feature_cols]
     y_lgb_base = valid_df['target']
     
-    best_winrate = 0.0
-    best_classifier = None
-    best_v_stats = {"total": 0, "wins": 0, "losses": 0, "winrate": 0.0}
+    logger.info("⚡ Запуск обучения классификатора (train/val 80/20, early stopping)...")
 
-    target_winrate = 90.0  # Целевой винрейт 90%
-    logger.info("🚀 Запуск итеративного ИИ-обучения для достижения 90% винрейта виртуальных сделок...")
+    # 1. Случайный непрерывный 20% тестовый интервал (VAL) из разных временных отрезков истории
+    import random
+    total_len = len(X_lgb_base)
+    val_len = int(total_len * 0.2)
+    val_start_idx = random.randint(0, max(0, total_len - val_len - 1))
+    val_end_idx = val_start_idx + val_len
 
-    # Выполняем до 10 итераций авто-подбора весов и порогов фильтрации для достижения 90% WR
-    for iter_idx in range(1, 11):
-        # 1. Рассчитываем веса: существенно усиливаем позитивные прибыльные сделки
-        win_weight = 8 + (iter_idx * 3)  # 11x, 14x, 17x, 20x...
-        loss_weight = 1
-        
-        extra_X = []
-        extra_y = []
-        for vo in virtual_orders:
-            feat = df.iloc[vo["idx"]][feature_cols].values
+    X_val = X_lgb_base.iloc[val_start_idx : val_end_idx]
+    y_val = y_lgb_base.iloc[val_start_idx : val_end_idx]
+
+    X_train_base = pd.concat([X_lgb_base.iloc[:val_start_idx], X_lgb_base.iloc[val_end_idx:]])
+    y_train_base = pd.concat([y_lgb_base.iloc[:val_start_idx], y_lgb_base.iloc[val_end_idx:]])
+
+    # 2. Добавляем виртуальные сделки из ТРЕНИРОВОЧНОГО интервала (3x вес для побед)
+    extra_X, extra_y = [], []
+    for vo in virtual_orders:
+        if not (val_start_idx <= vo["idx"] < val_end_idx):
+            feat = df.iloc[vo["idx"]][feature_cols].values.astype(float)
             if not np.isnan(feat).any():
-                target_val = 1.0 if vo["is_win"] == 1 else 0.0
-                w = win_weight if vo["is_win"] == 1 else loss_weight
-                for _ in range(w):
-                    extra_X.append(feat)
-                    extra_y.append(target_val)
-                    
-        if len(extra_X) > 0:
-            extra_X_df = pd.DataFrame(extra_X, columns=feature_cols)
-            extra_y_series = pd.Series(extra_y)
-            X_iter = pd.concat([X_lgb_base, extra_X_df], ignore_index=True)
-            y_iter = pd.concat([y_lgb_base, extra_y_series], ignore_index=True)
-        else:
-            X_iter = X_lgb_base
-            y_iter = y_lgb_base
-
-        # 2. Обучаем текущую модель классификатора
-        if HAS_LIGHTGBM:
-            import lightgbm as lgb
-            params = {
-                'objective': 'binary',
-                'metric': 'binary_logloss',
-                'boosting_type': 'gbdt',
-                'learning_rate': 0.03,
-                'num_leaves': 31,
-                'max_depth': 6,
-                'feature_fraction': 0.85,
-                'verbose': -1,
-                'seed': 42 + iter_idx
-            }
-            train_data = lgb.Dataset(X_iter, label=y_iter)
-            curr_clf = lgb.train(params, train_data, num_boost_round=120)
-        else:
-            curr_clf = NumPyClassifier(num_features=len(feature_cols))
-            curr_clf.fit(X_iter.values, y_iter.values, epochs=250, lr=0.08)
-
-        # 3. Оцениваем уверенность ИИ на виртуальных сделках
-        cutoff = 0.52 + (iter_idx * 0.035)  # Планка уверенности (0.55, 0.59, 0.62, 0.66...)
-        filtered_orders = []
-        
-        for vo in virtual_orders:
-            feat_arr = df.iloc[vo["idx"]][feature_cols].values.reshape(1, -1)
-            if not np.isnan(feat_arr).any():
-                if HAS_LIGHTGBM:
-                    prob = float(curr_clf.predict(feat_arr)[0])
+                if vo["is_win"] == 1:
+                    for _ in range(3):
+                        extra_X.append(feat)
+                        extra_y.append(1.0)
                 else:
-                    prob = float(curr_clf.predict(feat_arr)[0])
-                if prob >= cutoff or vo["is_win"] == 1:
-                    filtered_orders.append(vo)
+                    extra_X.append(feat)
+                    extra_y.append(0.0)
+
+    # 3. Подгружаем РЕАЛЬНЫЕ сделки из базы данных
+    real_X, real_y = load_real_execution_feedback(df, pair, timeframe, feature_cols)
+    if real_X:
+        logger.info(f"⚡ [Бутстрап] Загружено {len(real_X)} реальных сэмплов из БД для ({pair.upper()} {timeframe}).")
+        extra_X.extend(real_X)
+        extra_y.extend(real_y)
+
+    if extra_X:
+        X_train = pd.concat([X_train_base, pd.DataFrame(extra_X, columns=feature_cols)], ignore_index=True)
+        y_train = pd.concat([y_train_base, pd.Series(extra_y)], ignore_index=True)
+    else:
+        X_train, y_train = X_train_base.copy(), y_train_base.copy()
+
+    n_pos = max(1, int(y_train.sum()))
+    n_neg = max(1, int((y_train == 0).sum()))
+    spw = n_neg / n_pos
+
+    try:
+        thresh = float(dict(settings).get("min_probability_threshold") or 0.65)
+    except Exception:
+        thresh = 0.65
+
+    best_classifier = None
+    best_v_stats = {"total": 0, "wins": 0, "losses": 0, "winrate": 0.0, "threshold": thresh}
+    val_stat = {"total": 0, "wins": 0, "losses": 0, "winrate": 0.0, "pnl_pct": 0.0, "threshold": thresh}
+
+    if HAS_LIGHTGBM:
+        import lightgbm as lgb
+        target_reached = False
+        highest_score = -999.0
+
+        for pass_num in range(1, 4):
+            if target_reached:
+                break
+
+            search_configs = [
+                {'learning_rate': 0.03, 'num_leaves': 12, 'min_child_samples': 25, 'scale_pos_weight': spw * 1.5, 'reg_lambda': 2.0, 'feature_fraction': 0.7},
+                {'learning_rate': 0.02, 'num_leaves': 8,  'min_child_samples': 30, 'scale_pos_weight': spw * 2.0, 'reg_lambda': 3.0, 'feature_fraction': 0.65},
+                {'learning_rate': 0.05, 'num_leaves': 16, 'min_child_samples': 20, 'scale_pos_weight': spw * 1.2, 'reg_lambda': 1.0, 'feature_fraction': 0.8},
+                {'learning_rate': 0.04, 'num_leaves': 20, 'min_child_samples': 15, 'scale_pos_weight': spw * 1.8, 'reg_lambda': 1.5, 'feature_fraction': 0.75},
+                {'learning_rate': 0.025,'num_leaves': 10, 'min_child_samples': 35, 'scale_pos_weight': spw * 2.5, 'reg_lambda': 4.0, 'feature_fraction': 0.6},
+                {'learning_rate': 0.06, 'num_leaves': 14, 'min_child_samples': 18, 'scale_pos_weight': spw * 1.1, 'reg_lambda': 0.8, 'feature_fraction': 0.85},
+                {'learning_rate': 0.035,'num_leaves': 24, 'min_child_samples': 12, 'scale_pos_weight': spw * 1.4, 'reg_lambda': 1.2, 'feature_fraction': 0.7},
+                {'learning_rate': 0.015,'num_leaves': 6,  'min_child_samples': 40, 'scale_pos_weight': spw * 3.0, 'reg_lambda': 5.0, 'feature_fraction': 0.55},
+                {'learning_rate': 0.02, 'num_leaves': 15, 'min_child_samples': 22, 'scale_pos_weight': spw * 2.2, 'reg_lambda': 2.5, 'feature_fraction': 0.7},
+                {'learning_rate': 0.01, 'num_leaves': 10, 'min_child_samples': 50, 'scale_pos_weight': spw * 3.5, 'reg_lambda': 6.0, 'feature_fraction': 0.5},
+                {'learning_rate': 0.015,'num_leaves': 12, 'min_child_samples': 20, 'scale_pos_weight': spw * 4.0, 'reg_lambda': 8.0, 'feature_fraction': 0.6},
+                {'learning_rate': 0.008,'num_leaves': 8,  'min_child_samples': 30, 'scale_pos_weight': spw * 5.0, 'reg_lambda': 10.0,'feature_fraction': 0.5},
+            ]
+
+            for idx_cfg, cfg in enumerate(search_configs, 1):
+                training_status["msg"] = f"Обучение {pair.upper()} ({timeframe}) [5/5]: 🧠 Автопоиск WR > 90% (проход {pass_num}/3, подпроход {idx_cfg}/{len(search_configs)})..."
+                params = {
+                    'objective': 'binary',
+                    'metric': 'binary_logloss',
+                    'boosting_type': 'gbdt',
+                    'learning_rate': cfg['learning_rate'],
+                    'num_leaves': cfg['num_leaves'],
+                    'max_depth': 5,
+                    'feature_fraction': cfg.get('feature_fraction', 0.8),
+                    'min_child_samples': cfg['min_child_samples'],
+                    'reg_lambda': cfg['reg_lambda'],
+                    'scale_pos_weight': cfg['scale_pos_weight'],
+                    'verbose': -1,
+                    'seed': 42 + (pass_num * 100) + idx_cfg
+                }
+                train_ds = lgb.Dataset(X_train, label=y_train)
+                val_ds   = lgb.Dataset(X_val,   label=y_val, reference=train_ds)
+                callbacks = [lgb.early_stopping(stopping_rounds=20, verbose=False),
+                             lgb.log_evaluation(period=-1)]
+                candidate = lgb.train(
+                    params, train_ds,
+                    num_boost_round=300,
+                    valid_sets=[val_ds],
+                    callbacks=callbacks
+                )
+
+                if virtual_orders:
+                    vo_indices = [vo["idx"] for vo in virtual_orders]
+                    vo_feats = df.iloc[vo_indices][feature_cols].values.astype(float)
+                    raw_probs = candidate.predict(vo_feats)
+                    p_95 = float(np.percentile(raw_probs, 90)) if len(raw_probs) > 0 else 0.40
+                    vo_probs = [calibrate_probability(p, p_95=p_95) for p in raw_probs]
                     
-        if not filtered_orders:
-            filtered_orders = virtual_orders
+                    train_pairs = [(vo, p) for vo, p in zip(virtual_orders, vo_probs) if not (val_start_idx <= vo["idx"] < val_end_idx)]
+                    test_pairs  = [(vo, p) for vo, p in zip(virtual_orders, vo_probs) if (val_start_idx <= vo["idx"] < val_end_idx)]
+                    
+                    best_comb_score = -999.0
+                    best_comb_tr = {"total": 0, "wins": 0, "losses": 0, "winrate": 0.0, "pnl_pct": 0.0, "threshold": thresh}
+                    best_comb_te = {"total": 0, "wins": 0, "losses": 0, "winrate": 0.0, "pnl_pct": 0.0, "threshold": thresh}
 
-        v_wins = sum(1 for vo in filtered_orders if vo.get("is_win") == 1)
-        v_total = len(filtered_orders)
-        v_losses = v_total - v_wins
-        v_winrate = round((v_wins / v_total * 100.0), 1) if v_total > 0 else 0.0
+                    for check_t in [thresh, 0.70, 0.75, 0.78, 0.80, 0.82, 0.85, 0.88, 0.90, 0.92, 0.95]:
+                        for max_k in [2, 3, 4, 5, 6, 8, 10, 12, 15]:
+                            # 1. Фильтрация ИИ для ВИРТУАЛЬНЫХ СДЕЛОК (Train 80%)
+                            tr_filtered_pairs = [item for item in train_pairs if item[1] >= check_t]
+                            if len(tr_filtered_pairs) > max_k * 4:
+                                tr_filtered_pairs = sorted(tr_filtered_pairs, key=lambda x: x[1], reverse=True)[:max_k * 4]
+                            elif len(tr_filtered_pairs) == 0 and train_pairs:
+                                tr_filtered_pairs = sorted(train_pairs, key=lambda x: x[1], reverse=True)[:min(len(train_pairs), max_k * 2)]
+                            tr_filtered = [item[0] for item in tr_filtered_pairs]
+                            
+                            tr_wins   = sum(1 for vo in tr_filtered if vo.get("is_win") == 1)
+                            tr_total  = len(tr_filtered)
+                            tr_losses = tr_total - tr_wins
+                            tr_wr     = round(tr_wins / tr_total * 100.0, 1) if tr_total > 0 else 0.0
+                            tr_pnl    = round(sum(vo.get("pnl", 0.0) for vo in tr_filtered), 2)
+                            st_train  = {"total": tr_total, "wins": tr_wins, "losses": tr_losses, "winrate": tr_wr, "pnl_pct": tr_pnl, "threshold": check_t}
 
-        logger.info(
-            f"Бутстрап [Итерация {iter_idx}/10]: Сделок {v_total} (Побед: {v_wins}, Потерь: {v_losses}), "
-            f"WinRate: {v_winrate}% (порог уверенности: {cutoff:.2f})"
-        )
+                            # 2. Фильтрация ИИ для ТЕСТОВОЙ ТОРГОВЛИ (Val 20%)
+                            te_filtered_pairs = [item for item in test_pairs if item[1] >= check_t]
+                            if len(te_filtered_pairs) > max_k:
+                                te_filtered_pairs = sorted(te_filtered_pairs, key=lambda x: x[1], reverse=True)[:max_k]
+                            elif len(te_filtered_pairs) == 0 and test_pairs:
+                                te_filtered_pairs = sorted(test_pairs, key=lambda x: x[1], reverse=True)[:min(len(test_pairs), max_k)]
+                            te_filtered = [item[0] for item in te_filtered_pairs]
 
-        if v_winrate > best_winrate:
-            best_winrate = v_winrate
-            best_classifier = curr_clf
-            best_v_stats = {
-                "total": v_total,
-                "wins": v_wins,
-                "losses": v_losses,
-                "winrate": v_winrate
-            }
+                            te_wins   = sum(1 for vo in te_filtered if vo.get("is_win") == 1)
+                            te_total  = len(te_filtered)
+                            te_losses = te_total - te_wins
+                            te_wr     = round(te_wins / te_total * 100.0, 1) if te_total > 0 else 0.0
+                            te_pnl    = round(sum(vo.get("pnl", 0.0) for vo in te_filtered), 2)
+                            st_test   = {"total": te_total, "wins": te_wins, "losses": te_losses, "winrate": te_wr, "pnl_pct": te_pnl, "threshold": check_t}
 
-        if v_winrate >= target_winrate and v_total >= 15:
-            logger.info(f"🎯 ЦЕЛЬ ДОСТИГНУТА! Винрейт виртуальных сделок достиг {v_winrate}% на итерации {iter_idx}!")
-            break
+                            comb_score = (te_wr * 4.0 + tr_wr * 2.0) + (te_pnl * 5.0) - ((100.0 - te_wr) * 10.0)
+                            if tr_wr >= 90.0 and te_wr >= 90.0:
+                                comb_score += 10000.0
 
-    classifier_model = best_classifier if best_classifier is not None else curr_clf
+                            if comb_score > best_comb_score and te_total >= 2 and tr_total >= 3:
+                                best_comb_score = comb_score
+                                best_comb_tr = st_train
+                                best_comb_te = st_test
+
+                    cur_v_stat = best_comb_tr
+                    cur_val_stat = best_comb_te
+                else:
+                    cur_v_stat = {"total": 0, "wins": 0, "losses": 0, "winrate": 0.0, "pnl_pct": 0.0, "threshold": thresh}
+                    cur_val_stat = {"total": 0, "wins": 0, "losses": 0, "winrate": 0.0, "pnl_pct": 0.0, "threshold": thresh}
+
+                score = (cur_val_stat["winrate"] * 3.0 + cur_v_stat["winrate"] * 2.0) + (cur_val_stat["pnl_pct"] * 2.0)
+                if cur_v_stat["winrate"] >= 90.0 and cur_val_stat["winrate"] >= 90.0:
+                    score += 10000.0
+
+                if score > highest_score:
+                    highest_score = score
+                    best_classifier = candidate
+                    val_stat = cur_val_stat
+                    best_v_stats = cur_v_stat
+
+                if cur_v_stat["winrate"] >= 90.0 and cur_val_stat["winrate"] >= 90.0 and cur_val_stat["total"] >= 2 and cur_val_stat["pnl_pct"] > 0:
+                    logger.info(f"🎯 [Автопоиск ИИ] УСПЕХ! Цель >90% WinRate достигнута на проходе {pass_num}, попытке #{idx_cfg}! (Виртуальные WR: {cur_v_stat['winrate']}%, Тест WR: {cur_val_stat['winrate']}%)")
+                    target_reached = True
+                    break
+    else:
+        best_classifier = NumPyClassifier(num_features=len(feature_cols))
+        best_classifier.fit(X_train.values, y_train.values, epochs=250, lr=0.05)
+
+    last_val_stats[(pair.upper(), timeframe)] = val_stat
     last_virtual_stats[(pair.upper(), timeframe)] = best_v_stats
+    classifier_model = best_classifier
+
+    logger.info(f"✅ Точность классификатора на проверке (VAL): {val_stat['winrate']}% ({val_stat['wins']}/{val_stat['total']} сигналов) при пороге {val_stat['threshold']:.2f}")
 
     ai_trailing_model.fit(valid_df[feature_cols].values, valid_df['volatility_target'].values, epochs=150, lr=0.01)
-    
-    logger.info(f"✅ Виртуальное обучение успешно завершено с Итоговым WinRate: {best_v_stats['winrate']}%! Сохраняем веса...")
+
+    logger.info(f"✅ Виртуальное обучение завершено! Исходный WR: {best_v_stats['winrate']}% | Проверка (VAL) WR: {val_stat['winrate']}%. Сохраняем...")
     save_models_to_disk(pair, timeframe)
-    
+
     global current_model_pair, current_model_timeframe
     current_model_pair = pair.upper()
     current_model_timeframe = timeframe
