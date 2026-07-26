@@ -264,8 +264,14 @@ class NumPyTrailingModel:
         
     def forward(self, X):
         X = np.array(X)
+        if self.W is not None and X.ndim == 2 and X.shape[1] != len(self.W):
+            X = X[:, :len(self.W)]
+        elif self.W is not None and X.ndim == 1 and len(X) != len(self.W):
+            X = X[:len(self.W)]
         if self.mean is not None and self.std is not None:
-            X_scaled = (X - self.mean) / self.std
+            mean = self.mean[:X.shape[-1]] if len(self.mean) != X.shape[-1] else self.mean
+            std = self.std[:X.shape[-1]] if len(self.std) != X.shape[-1] else self.std
+            X_scaled = (X - mean) / std
         else:
             X_scaled = X
         return X_scaled @ self.W + self.b
@@ -283,6 +289,9 @@ class NumPyTrailingModel:
         N = len(y)
         if N == 0:
             return
+        if self.W is None or len(self.W) != X.shape[1]:
+            self.num_features = X.shape[1]
+            self.W = np.zeros((self.num_features,))
         self.mean = np.mean(X, axis=0)
         self.std = np.std(X, axis=0) + 1e-8
         X_scaled = (X - self.mean) / self.std
@@ -298,7 +307,7 @@ class NumPyTrailingModel:
 # Глобальные инстанции моделей
 dlinear_model = None
 classifier_model = None
-ai_trailing_model = NumPyTrailingModel(num_features=9)
+ai_trailing_model = NumPyTrailingModel(num_features=12)
 current_model_pair = None
 current_model_timeframe = None
 last_virtual_stats = {}

@@ -1390,7 +1390,52 @@ def evaluate_market_signal(persist_log=False, place_order=False):
             order_msg = "Анализ завершен. Вход заблокирован высокой волатильностью."
         elif has_existing_pair:
             use_ai_exit = bool(settings_dict.get("use_ai_exit", 0))
-            if use_ai_exit and active_order and action in ["BUY", "SELL"] and action != active_order["side"].upper() and not vol_blocked and prob > threshold:
+            use_ai_trailing = bool(settings_dict.get("use_ai_trailing", 0))
+
+            should_ai_exit = False
+            exit_reason_label = "смена сигнала ИИ"
+
+            if active_order and use_ai_exit:
+                current_side = active_order["side"].upper()
+                
+                # 1. Прямой разворот тренда ИИ (BUY -> SELL или SELL -> BUY)
+                is_reversal = (action in ["BUY", "SELL"] and action != current_side and not vol_blocked and prob > threshold)
+                
+                # 2. Угасание импульса БЕЗ разворота (flip прогноза DLinear или падение уверенности Классификатора)
+                is_signal_decay = False
+                if current_side == "BUY":
+                    if pred_change_1m < -0.0004 or (prob < 0.42 and action != "BUY"):
+                        is_signal_decay = True
+                        exit_reason_label = "угасание импульса ИИ (без разворота)"
+                elif current_side == "SELL":
+                    if pred_change_1m > 0.0004 or (prob < 0.42 and action != "SELL"):
+                        is_signal_decay = True
+                        exit_reason_label = "угасание импульса ИИ (без разворота)"
+
+                # 3. Умный ИИ-трейлинг стоп (NumPyTrailingModel на 12 фичах)
+                is_ai_trailing_exit = False
+                if use_ai_trailing and not is_reversal and not is_signal_decay:
+                    try:
+                        ai_trail_dist_pct = float(scalping_ensemble.ai_trailing_model.predict(features))
+                        entry_price = float(active_order["entry_price"])
+                        if current_side == "BUY":
+                            peak_price = float(active_order.get("peak_price") or entry_price)
+                            peak_price = max(peak_price, current_close)
+                            if peak_price > entry_price and (peak_price - current_close) / entry_price >= ai_trail_dist_pct:
+                                is_ai_trailing_exit = True
+                                exit_reason_label = f"ИИ-трейлинг стоп ({ai_trail_dist_pct*100:.2f}%)"
+                        elif current_side == "SELL":
+                            trough_price = float(active_order.get("trough_price") or entry_price)
+                            trough_price = min(trough_price, current_close)
+                            if trough_price < entry_price and (current_close - trough_price) / entry_price >= ai_trail_dist_pct:
+                                is_ai_trailing_exit = True
+                                exit_reason_label = f"ИИ-трейлинг стоп ({ai_trail_dist_pct*100:.2f}%)"
+                    except Exception as trail_ex:
+                        print(f"Error in ai_trailing evaluation: {trail_ex}")
+
+                should_ai_exit = is_reversal or is_signal_decay or is_ai_trailing_exit
+
+            if should_ai_exit and active_order:
                 entry_price = float(active_order["entry_price"])
                 amount = float(active_order["amount"])
                 current_side = active_order["side"].upper()
@@ -1414,19 +1459,19 @@ def evaluate_market_signal(persist_log=False, place_order=False):
                     except Exception as db_ex:
                         print(f"Error cancelling local pending order alongside active position: {db_ex}")
 
-                # Trigger post-trade learning logic
+                # Trigger post-trade learning logic for ALL 3 AI models (DLinear + LightGBM + AI Trailing)
                 handle_post_trade_learning(pair, timeframe, pnl)
 
                 pnl_sign = "+" if pnl >= 0 else ""
                 send_notification(
-                    f"🔄 <b>[{trading_mode} Mode] Позиция закрыта (смена сигнала ИИ)</b>\n\n"
+                    f"🔄 <b>[{trading_mode} Mode] Позиция закрыта ИИ ({exit_reason_label})</b>\n\n"
                     f"Пара: <b>{pair}</b>\n"
                     f"Сделка: {current_side}\n"
                     f"Цена входа: ${entry_price:,.4f}\n"
                     f"Цена закрытия: ${current_close:,.4f}\n"
                     f"Чистый PnL: <b>{pnl_sign}${pnl:,.2f}</b>"
                 )
-                order_msg = f"Текущая позиция {current_side} по {pair} закрыта из-за смены сигнала."
+                order_msg = f"Текущая позиция {current_side} по {pair} закрыта ИИ ({exit_reason_label})."
             elif use_ai_exit and pending_order and action in ["BUY", "SELL"] and action != pending_order["side"].upper() and not vol_blocked and prob > threshold:
                 p_side = pending_order["side"].upper()
                 p_entry = float(pending_order.get("entry_price", 0.0))
