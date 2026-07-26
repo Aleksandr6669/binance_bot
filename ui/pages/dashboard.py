@@ -3,6 +3,7 @@ import flet_charts as ftc
 import db
 import json
 import trading_engine
+import scalping_ensemble
 import threading
 import asyncio
 from datetime import datetime, timezone, timedelta
