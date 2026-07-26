@@ -788,7 +788,7 @@ def build_settings_view(page: ft.Page, lang: str):
             ft.dropdown.Option("STAGNATION_AND_REVERSAL", "Разворот + Застой"),
         ],
         value=settings.get("ai_exit_mode", "STAGNATION_AND_REVERSAL"),
-        width=175,
+        width=205,
         on_change=trigger_autosave_instant
     )
 
