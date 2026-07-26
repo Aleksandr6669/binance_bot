@@ -518,11 +518,19 @@ def build_dashboard_view(page: ft.Page, lang: str):
                 ml_log_time.value = f"🕐  Last run: {ts} ({source_desc})"
                 ml_strategy_title.value = f"{t_ai_strat} ({pair} • {timeframe} • {market_type})"
             else:
-                t_no_ai_dec = t("no_ai_dec", lang)
-                ml_logs_stage1.value = t_no_ai_dec
-                ml_logs_stage2.value = ""
-                ml_logs_stage3.value = ""
-                ml_log_time.value = "Last run: —"
+                is_tr_active = scalping_ensemble.training_status.get("active", False)
+                tr_msg = scalping_ensemble.training_status.get("msg", "")
+                
+                if is_tr_active:
+                    ml_logs_stage1.value = "⏳ Идет автоматическое создание и обучение нейросети на истории рынка...\nПожалуйста, подождите." if lang == "ru" else "⏳ Automated model creation & training on market history in progress...\nPlease wait."
+                    ml_logs_stage2.value = f"⚙️ {tr_msg or 'Сбор свечей и векторов индикаторов...'}"
+                    ml_logs_stage3.value = "🤖 Нейросеть обучается и подстраивается под рыночный тренд..." if lang == "ru" else "🤖 AI model is adapting to market trend..."
+                    ml_log_time.value = "🕐 Status: Обучение нейросети..." if lang == "ru" else "🕐 Status: AI Training..."
+                else:
+                    ml_logs_stage1.value = "⏳ Инициализация нейросети и генерация торговой стратегии..." if lang == "ru" else "⏳ Initializing AI model & generating strategy..."
+                    ml_logs_stage2.value = "⚙️ Загрузка данных свечей с биржи..." if lang == "ru" else "⚙️ Fetching candle data from exchange..."
+                    ml_logs_stage3.value = "🤖 Ожидание завершения первого расчёта сигнала..." if lang == "ru" else "🤖 Waiting for first signal calculation..."
+                    ml_log_time.value = "🕐 Status: Инициализация..." if lang == "ru" else "🕐 Status: Initializing..."
         except Exception as e:
             if is_destroyed_session_error(e):
                 raise e
