@@ -791,7 +791,7 @@ def build_settings_view(page: ft.Page, lang: str):
         width=210,
         height=38,
         text_size=11,
-        focused_color=PRIMARY_COLOR,
+        focused_color=CYAN_COLOR,
         border_color=BORDER_COLOR,
         on_change=trigger_autosave_instant
     )
