@@ -526,8 +526,10 @@ def save_models_to_disk(pair, timeframe):
             "db_analysis_logs": analysis_logs,
             "db_market_candles": market_candles
         }
-        with open(filepath, "wb") as f:
+        tmp_filepath = filepath + ".tmp"
+        with open(tmp_filepath, "wb") as f:
             pickle.dump(data, f)
+        os.replace(tmp_filepath, filepath)
             
         # Write fast JSON sidecar metadata file for instant UI loading
         try:
@@ -574,8 +576,14 @@ def load_models_from_disk(pair, timeframe):
         filepath = f"models/{pair.upper()}_{timeframe}.pkl"
         if not os.path.exists(filepath):
             return False
-        with open(filepath, "rb") as f:
-            data = pickle.load(f)
+        try:
+            with open(filepath, "rb") as f:
+                data = pickle.load(f)
+        except Exception as load_err:
+            logger.warning(f"Файл моделей {filepath} поврежден ({load_err}). Удаляем невалидный файл...")
+            try: os.remove(filepath)
+            except: pass
+            return False
         
         # Обновляем глобальные инстанции моделей
         dlinear_model = data["dlinear"]

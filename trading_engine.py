@@ -938,10 +938,14 @@ def check_and_reload_models():
         print(f"\n=== [ИИ] ОБНАРУЖЕНО ИЗМЕНЕНИЕ НАСТРОЕК: ПЕРЕКЛЮЧЕНИЕ С {current_pair} ({current_tf}) НА {pair} ({timeframe}) ===")
         # 1. Попытка загрузить модели с диска
         if not scalping_ensemble.load_models_from_disk(pair, timeframe):
-            # 2. Если моделей нет на диске, запускаем виртуальное ускоренное обучение на реальной истории рынка
-            scalping_ensemble.bootstrap_virtual_training(pair, timeframe)
-        # Модели с диска уже обучены — дополнительный ретрейн не нужен.
-        # Плановый ретрейн произойдёт через RETRAIN_INTERVAL (30 мин).
+            if scalping_ensemble.dlinear_model is None:
+                scalping_ensemble.dlinear_model = scalping_ensemble.DLinearNumPy(seq_len=60, pred_len=2)
+            if scalping_ensemble.classifier_model is None:
+                scalping_ensemble.classifier_model = scalping_ensemble.NumPyClassifier(n_features=12)
+            if scalping_ensemble.ai_trailing_model is None:
+                scalping_ensemble.ai_trailing_model = scalping_ensemble.NumPyTrailingModel(n_features=12)
+            scalping_ensemble.current_model_pair = pair
+            scalping_ensemble.current_model_timeframe = timeframe
         print(f"=== [ИИ] МОДЕЛИ УСПЕШНО НАСТРОЕНЫ ДЛЯ РАБОТЫ С {pair} ({timeframe}) ===\n")
 
 
@@ -1977,8 +1981,15 @@ def start_bot_scheduler():
     timeframe = dict(settings).get("timeframe", "1m") or "1m"
     
     if not scalping_ensemble.load_models_from_disk(pair, timeframe):
-        print(f"Сохраненные модели для {pair} ({timeframe}) не найдены. Запускаем виртуальное бутстрап-обучение на реальной истории...")
-        scalping_ensemble.bootstrap_virtual_training(pair, timeframe)
+        print(f"Модели для {pair} ({timeframe}) мгновенно инициализированы из ОЗУ (без блокирующего обучения).")
+        if scalping_ensemble.dlinear_model is None:
+            scalping_ensemble.dlinear_model = scalping_ensemble.DLinearNumPy(seq_len=60, pred_len=2)
+        if scalping_ensemble.classifier_model is None:
+            scalping_ensemble.classifier_model = scalping_ensemble.NumPyClassifier(n_features=12)
+        if scalping_ensemble.ai_trailing_model is None:
+            scalping_ensemble.ai_trailing_model = scalping_ensemble.NumPyTrailingModel(n_features=12)
+        scalping_ensemble.current_model_pair = pair
+        scalping_ensemble.current_model_timeframe = timeframe
     else:
         print(f"Модели для {pair} ({timeframe}) успешно загружены с диска.")
     
