@@ -784,11 +784,11 @@ def build_settings_view(page: ft.Page, lang: str):
 
     ai_exit_mode_dd = make_dropdown(
         options=[
-            ft.dropdown.Option("REVERSAL_ONLY", "Только при развороте ИИ"),
-            ft.dropdown.Option("STAGNATION_AND_REVERSAL", "Разворот ИИ + Застой (3+ мин)"),
+            ft.dropdown.Option("REVERSAL_ONLY", "Разворот ИИ"),
+            ft.dropdown.Option("STAGNATION_AND_REVERSAL", "Разворот + Застой"),
         ],
         value=settings.get("ai_exit_mode", "STAGNATION_AND_REVERSAL"),
-        width=210,
+        width=175,
         on_change=trigger_autosave_instant
     )
 
