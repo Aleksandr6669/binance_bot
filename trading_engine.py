@@ -2040,6 +2040,17 @@ def start_bot_scheduler():
     if _bot_runner_thread is None or not _bot_runner_thread.is_alive():
         _bot_runner_thread = threading.Thread(target=run_automated_trading_bot, daemon=True)
         _bot_runner_thread.start()
+    
+    # 4. Прогрев: немедленный первичный инференс нейросети в фоне при старте
+    # Гарантирует что LATEST_LIVE_SIGNAL заполнен сразу после запуска (не ждём первого тика бота)
+    def _warmup_signal():
+        try:
+            result = evaluate_market_signal(persist_log=False, place_order=False)
+            if result.get("success"):
+                print(f"[WARMUP] Первичный сигнал ИИ готов: {result.get('action')} (p={result.get('probability', 0):.2f})")
+        except Exception as ex:
+            print(f"[WARMUP] Ошибка первичного инференса: {ex}")
+    threading.Thread(target=_warmup_signal, daemon=True).start()
 
 def stop_bot_scheduler():
     """Останавливает все фоновые потоки."""
