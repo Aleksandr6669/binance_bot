@@ -662,7 +662,7 @@ def load_models_from_disk(pair, timeframe):
 def get_models_metadata_list():
     """
     Возвращает список метаданных всех сохраненных моделей в папке models/.
-    Использует сверхбыстрые .meta.json файлы для мгновенной отклика интерфейса (0ms).
+    Использует сверхбыстрые .meta.json и .pkl файлы для мгновенной отрисовки.
     """
     import os, datetime, pickle, json
     models_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
@@ -670,12 +670,23 @@ def get_models_metadata_list():
         return []
     
     result = []
-    files = [f for f in os.listdir(models_dir) if f.endswith(".pkl")]
-    files.sort()
+    try:
+        all_files = os.listdir(models_dir)
+    except Exception:
+        return []
+
+    base_names = set()
+    for f in all_files:
+        if f.endswith(".meta.json"):
+            base_names.add(f[:-10])
+        elif f.endswith(".pkl") and not f.endswith(".pkl.tmp"):
+            base_names.add(f[:-4])
+            
+    sorted_base_names = sorted(list(base_names))
     
-    for filename in files:
+    for name_no_ext in sorted_base_names:
+        filename = f"{name_no_ext}.pkl"
         filepath = os.path.join(models_dir, filename)
-        name_no_ext = filename[:-4]
         meta_filepath = os.path.join(models_dir, f"{name_no_ext}.meta.json")
         
         parts = name_no_ext.split("_")
@@ -694,79 +705,80 @@ def get_models_metadata_list():
             except Exception:
                 pass
         
-        # 2. Фолбэк на замер pickle (только при первом запуске без json)
-        try:
-            stat = os.stat(filepath)
-            mtime = datetime.datetime.fromtimestamp(stat.st_mtime).astimezone().strftime("%Y-%m-%d %H:%M:%S")
-            size_mb = round(stat.st_size / (1024 * 1024), 2)
-        except Exception:
-            mtime = "—"
-            size_mb = 0.0
-        
-        candles_count = 0
-        feedback_count = 0
-        classifier_type = "NumPy Classifier"
-        loss_val = 0.000016
-        
-        try:
-            with open(filepath, "rb") as f:
-                data = pickle.load(f)
-                candles_count = len(data.get("db_market_candles", []))
-                feedback_count = len(data.get("db_analysis_logs", []))
-                clf = data.get("classifier")
-                dl = data.get("dlinear")
-                
-                if clf is not None:
-                    clf_name = type(clf).__name__
-                    if "Booster" in clf_name or "lightgbm" in str(type(clf)).lower():
-                        classifier_type = "LightGBM (Gradient Boosting)"
-                    else:
-                        classifier_type = "NumPy Classifier"
-                
-                if "loss" in data and data["loss"] is not None:
-                    loss_val = float(data["loss"])
-                elif dl is not None and hasattr(dl, "last_loss"):
-                    loss_val = float(dl.last_loss)
-                    
-                v_stat = data.get("virtual_stats", {"total": 0, "wins": 0, "losses": 0, "winrate": 0.0})
-                r_stat = data.get("real_stats", {"total": 0, "wins": 0, "losses": 0, "winrate": 0.0})
-
-                # Создаем meta.json для последующих мгновенных загрузок
-                try:
-                    meta_to_write = {
-                        "pair": pair,
-                        "timeframe": timeframe,
-                        "classifier_type": classifier_type,
-                        "candles_count": candles_count,
-                        "feedback_count": feedback_count,
-                        "loss": loss_val,
-                        "virtual_stats": v_stat,
-                        "real_stats": r_stat,
-                        "mtime": mtime,
-                        "size_mb": size_mb
-                    }
-                    with open(meta_filepath, "w", encoding="utf-8") as f_meta:
-                        json.dump(meta_to_write, f_meta, ensure_ascii=False, indent=2)
-                except Exception:
-                    pass
-        except Exception:
+        # 2. Фолбэк на замер pickle (если еще нет meta.json)
+        if os.path.exists(filepath):
+            try:
+                stat = os.stat(filepath)
+                mtime = datetime.datetime.fromtimestamp(stat.st_mtime).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+                size_mb = round(stat.st_size / (1024 * 1024), 2)
+            except Exception:
+                mtime = "—"
+                size_mb = 0.0
+            
+            candles_count = 0
+            feedback_count = 0
+            classifier_type = "NumPy Classifier"
+            loss_val = 0.000016
             v_stat = {"total": 0, "wins": 0, "losses": 0, "winrate": 0.0}
             r_stat = {"total": 0, "wins": 0, "losses": 0, "winrate": 0.0}
             
-        result.append({
-            "filename": filename,
-            "pair": pair,
-            "timeframe": timeframe,
-            "classifier_type": classifier_type,
-            "candles_count": candles_count,
-            "feedback_count": feedback_count,
-            "loss": loss_val,
-            "virtual_stats": v_stat,
-            "real_stats": r_stat,
-            "mtime": mtime,
-            "size_mb": size_mb,
-            "filepath": filepath
-        })
+            try:
+                with open(filepath, "rb") as f:
+                    data = pickle.load(f)
+                    candles_count = len(data.get("db_market_candles", []))
+                    feedback_count = len(data.get("db_analysis_logs", []))
+                    clf = data.get("classifier")
+                    dl = data.get("dlinear")
+                    
+                    if clf is not None:
+                        clf_name = type(clf).__name__
+                        if "Booster" in clf_name or "lightgbm" in str(type(clf)).lower():
+                            classifier_type = "LightGBM (Gradient Boosting)"
+                        else:
+                            classifier_type = "NumPy Classifier"
+                    
+                    if "loss" in data and data["loss"] is not None:
+                        loss_val = float(data["loss"])
+                    elif dl is not None and hasattr(dl, "last_loss"):
+                        loss_val = float(dl.last_loss)
+                        
+                    v_stat = data.get("virtual_stats", {"total": 0, "wins": 0, "losses": 0, "winrate": 0.0})
+                    r_stat = data.get("real_stats", {"total": 0, "wins": 0, "losses": 0, "winrate": 0.0})
+
+                    try:
+                        meta_to_write = {
+                            "pair": pair,
+                            "timeframe": timeframe,
+                            "classifier_type": classifier_type,
+                            "candles_count": candles_count,
+                            "feedback_count": feedback_count,
+                            "loss": loss_val,
+                            "virtual_stats": v_stat,
+                            "real_stats": r_stat,
+                            "mtime": mtime,
+                            "size_mb": size_mb
+                        }
+                        with open(meta_filepath, "w", encoding="utf-8") as f_meta:
+                            json.dump(meta_to_write, f_meta, ensure_ascii=False, indent=2)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+                
+            result.append({
+                "filename": filename,
+                "pair": pair,
+                "timeframe": timeframe,
+                "classifier_type": classifier_type,
+                "candles_count": candles_count,
+                "feedback_count": feedback_count,
+                "loss": loss_val,
+                "virtual_stats": v_stat,
+                "real_stats": r_stat,
+                "mtime": mtime,
+                "size_mb": size_mb,
+                "filepath": filepath
+            })
         
     return result
 
@@ -783,10 +795,14 @@ def delete_model_file(pair, timeframe):
             deleted = True
         if os.path.exists(meta_filepath):
             os.remove(meta_filepath)
+            deleted = True
             
         if deleted:
             logger.info(f"Файл модели {filename} успешно удален.")
             return True
+        return False
+    except Exception as ex:
+        logger.error(f"Ошибка при удалении файла модели {pair} ({timeframe}): {ex}")
         return False
     except Exception as e:
         logger.error(f"Ошибка удаления файла модели {pair} ({timeframe}): {e}")
