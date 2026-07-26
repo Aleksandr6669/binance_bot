@@ -793,11 +793,11 @@ def build_settings_view(page: ft.Page, lang: str):
 
     ai_exit_mode_dd = make_dropdown(
         options=[
-            ft.dropdown.Option("REVERSAL_ONLY", "Разворот ИИ" if lang == "ru" else "AI Reversal"),
-            ft.dropdown.Option("STAGNATION_AND_REVERSAL", "Разворот + Застой" if lang == "ru" else "Reversal + Stagnation"),
+            ft.dropdown.Option("REVERSAL_ONLY", "Только разворот тренда" if lang == "ru" else "AI Reversal Only"),
+            ft.dropdown.Option("STAGNATION_AND_REVERSAL", "Разворот + Выход по застою" if lang == "ru" else "Reversal + Stagnation Exit"),
         ],
         value=settings.get("ai_exit_mode", "STAGNATION_AND_REVERSAL"),
-        width=205,
+        width=230,
         on_change=on_ai_exit_mode_change
     )
 
@@ -905,73 +905,48 @@ def build_settings_view(page: ft.Page, lang: str):
             height=80,
             alignment=ft.alignment.Alignment(-1.0, 0.0)
         )
-        
-    ai_exit_box = ft.Container(
-        content=ft.Row(
-            [
-                ft.Column(
-                    [
-                        ft.Text(t("ai_exit_title", lang), size=12, weight=ft.FontWeight.BOLD, color="#f8fafc"),
-                        ft.Text(t("ai_exit_desc", lang), size=11, color="#94a3b8")
-                    ],
-                    expand=True,
-                    alignment=ft.MainAxisAlignment.CENTER,
-                    spacing=4
-                ),
-                ft.Row(
-                    [
-                        ai_exit_mode_dd,
-                        use_ai_exit_sw
-                    ],
-                    spacing=10,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER
-                )
-            ],
-            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER
-        ),
-        bgcolor=ft.Colors.with_opacity(0.05, "#ffffff"),
-        padding=ft.Padding(15, 0, 15, 0),
-        border_radius=8,
-        border=ft.Border.all(1, ft.Colors.TRANSPARENT),
-        col={"xs": 12, "md": 6},
-        height=80,
-        alignment=ft.alignment.Alignment(-1.0, 0.0)
-    )
 
     switches_row = ft.ResponsiveRow(
         [
             make_switch_box(t("invert_signal_title", lang), invert_signal_sw, t("invert_signal_desc", lang)),
             make_switch_box(t("use_limit_orders_title", lang), use_limit_sw, t("use_limit_orders_desc", lang)),
             make_switch_box(t("ai_trade_range_title", lang), use_ai_limit_sw, t("ai_trade_range_desc", lang)),
-            ai_exit_box
+            make_switch_box(t("ai_exit_title", lang), use_ai_exit_sw, t("ai_exit_desc", lang))
         ],
         spacing=10
     )
 
     stagnation_control_box = ft.Container(
-        content=ft.Row(
+        content=ft.Column(
             [
-                ft.Column(
-                    [
-                        ft.Text("ПАРАМЕТРЫ ЗАСТОЯ ИИ" if lang == "ru" else "AI STAGNATION PARAMETERS", size=12, weight=ft.FontWeight.BOLD, color="#38bdf8"),
-                        ft.Text("Настройка времени (в свечах) и порога PnL для выхода при затишье" if lang == "ru" else "Adjust duration (candles) and profit threshold for stagnation exit", size=11, color="#94a3b8")
-                    ],
-                    expand=True
-                ),
                 ft.Row(
                     [
-                        ft.Text("Длительность:" if lang == "ru" else "Duration:", size=11, color="#f8fafc"),
-                        stagnation_candles_dd,
-                        ft.Text("Порог PnL:" if lang == "ru" else "PnL Threshold:", size=11, color="#f8fafc"),
-                        stagnation_pnl_dd,
+                        ft.Icon(ft.Icons.TIMER_OUTLINED, color="#38bdf8", size=16),
+                        ft.Text("ПАРАМЕТРЫ И РЕЖИМ ЗАСТОЯ ИИ" if lang == "ru" else "AI STAGNATION & EXIT PARAMETERS", size=12, weight=ft.FontWeight.BOLD, color="#38bdf8")
                     ],
-                    spacing=10,
+                    spacing=8
+                ),
+                ft.Text("Управление логикой выхода при затишье, время ожидания импульса (в свечах) и порог профита" if lang == "ru" else "Manage stagnation exit logic, duration (in candles) and profit threshold", size=11, color="#94a3b8"),
+                ft.Row(
+                    [
+                        ft.Column([
+                            ft.Text("Режим выхода ИИ:" if lang == "ru" else "AI Exit Mode:", size=11, color="#f8fafc", weight=ft.FontWeight.BOLD),
+                            ai_exit_mode_dd
+                        ]),
+                        ft.Column([
+                            ft.Text("Длительность:" if lang == "ru" else "Duration:", size=11, color="#f8fafc", weight=ft.FontWeight.BOLD),
+                            stagnation_candles_dd
+                        ]),
+                        ft.Column([
+                            ft.Text("Порог PnL:" if lang == "ru" else "PnL Threshold:", size=11, color="#f8fafc", weight=ft.FontWeight.BOLD),
+                            stagnation_pnl_dd
+                        ]),
+                    ],
+                    spacing=15,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER
                 )
             ],
-            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER
+            spacing=10
         ),
         bgcolor=ft.Colors.with_opacity(0.05, "#ffffff"),
         padding=15,
