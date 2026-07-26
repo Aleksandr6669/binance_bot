@@ -421,15 +421,18 @@ def evaluate_ai_exit_neural_decision(active_order, current_close, features):
         else:
             pnl_pct = (entry_price - current_close) / (entry_price + 1e-10)
 
-        # Длительность сделки в минутах (нормированная до 1.0 за 60 мин)
         order_created_at = active_order.get("created_at")
-        order_age_min = 0.5
+        order_age_min = 0.0
         if order_created_at:
             try:
-                o_dt = pd.to_datetime(order_created_at)
-                order_age_min = (pd.Timestamp.now() - o_dt).total_seconds() / 60.0
+                from datetime import datetime, timezone
+                if isinstance(order_created_at, str):
+                    o_dt = datetime.strptime(order_created_at.split(".")[0], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                else:
+                    o_dt = pd.to_datetime(order_created_at).tz_localize(timezone.utc)
+                order_age_min = max(0.0, (datetime.now(timezone.utc) - o_dt).total_seconds() / 60.0)
             except Exception:
-                order_age_min = 0.5
+                order_age_min = 0.0
         order_age_norm = np.clip(order_age_min / 60.0, 0.0, 1.0)
 
         # Собираем 14-мерный вектор входных данных для нейросети выходов

@@ -1403,13 +1403,18 @@ def evaluate_market_signal(persist_log=False, place_order=False):
                 current_side = active_order["side"].upper()
                 order_created_at = active_order.get("created_at")
                 entry_price = float(active_order["entry_price"])
-                order_age_sec = 999.0
+                order_age_sec = 0.0
                 if order_created_at:
                     try:
-                        o_dt = pd.to_datetime(order_created_at)
-                        order_age_sec = (pd.Timestamp.now() - o_dt).total_seconds()
-                    except Exception:
-                        order_age_sec = 999.0
+                        from datetime import datetime, timezone
+                        if isinstance(order_created_at, str):
+                            o_dt = datetime.strptime(order_created_at.split(".")[0], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                        else:
+                            o_dt = pd.to_datetime(order_created_at).tz_localize(timezone.utc)
+                        order_age_sec = max(0.0, (datetime.now(timezone.utc) - o_dt).total_seconds())
+                    except Exception as dt_err:
+                        print(f"Error calculating order_age_sec: {dt_err}")
+                        order_age_sec = 0.0
                 
                 # 1. Прямой разворот тренда ИИ (BUY -> SELL или SELL -> BUY)
                 is_reversal = (action in ["BUY", "SELL"] and action != current_side and not vol_blocked and prob > threshold)
