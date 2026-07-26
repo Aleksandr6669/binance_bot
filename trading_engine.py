@@ -18,6 +18,7 @@ _stop_event = threading.Event()
 _simulator_thread = None
 _bot_runner_thread = None
 LATEST_LIVE_SIGNAL = None
+WARMUP_IN_PROGRESS = False  # True пока идёт первичный прогревочный инференс
 BOT_STARTUP_TIME = time.time()
 
 def get_model_n_features(model):
@@ -2069,12 +2070,16 @@ def start_bot_scheduler():
     # 4. Прогрев: немедленный первичный инференс нейросети в фоне при старте
     # Гарантирует что LATEST_LIVE_SIGNAL заполнен сразу после запуска (не ждём первого тика бота)
     def _warmup_signal():
+        global WARMUP_IN_PROGRESS
+        WARMUP_IN_PROGRESS = True
         try:
             result = evaluate_market_signal(persist_log=False, place_order=False)
             if result.get("success"):
                 print(f"[WARMUP] Первичный сигнал ИИ готов: {result.get('action')} (p={result.get('probability', 0):.2f})")
         except Exception as ex:
             print(f"[WARMUP] Ошибка первичного инференса: {ex}")
+        finally:
+            WARMUP_IN_PROGRESS = False
     threading.Thread(target=_warmup_signal, daemon=True).start()
 
 def stop_bot_scheduler():

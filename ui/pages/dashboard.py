@@ -455,15 +455,6 @@ def build_dashboard_view(page: ft.Page, lang: str):
         # 5. Логи ИИ (ТОЛЬКО 100% Живой расчет в реальном времени из ОЗУ!)
         try:
             latest_log = trading_engine.LATEST_LIVE_SIGNAL
-            
-            # Если сигнала ещё нет вообще — делаем единоразовый первичный инференс
-            if latest_log is None:
-                try:
-                    await asyncio.to_thread(trading_engine.evaluate_market_signal, False, False)
-                    latest_log = trading_engine.LATEST_LIVE_SIGNAL
-                except Exception as eval_ex:
-                    print(f"Live evaluation exception: {eval_ex}")
-            
             source_desc = "Live prediction"
             
             if latest_log:
@@ -515,19 +506,29 @@ def build_dashboard_view(page: ft.Page, lang: str):
                 ml_log_time.value = f"🕐  Last run: {ts} ({source_desc})"
                 ml_strategy_title.value = f"{t_ai_strat} ({pair} • {timeframe} • {market_type})"
             else:
+                # Сигнала ещё нет — определяем точную причину
                 is_tr_active = scalping_ensemble.training_status.get("active", False)
                 tr_msg = scalping_ensemble.training_status.get("msg", "")
+                is_warmup = getattr(trading_engine, "WARMUP_IN_PROGRESS", False)
                 
                 if is_tr_active:
-                    ml_logs_stage1.value = "⏳ Идет автоматическое создание и обучение нейросети на истории рынка...\nПожалуйста, подождите." if lang == "ru" else "⏳ Automated model creation & training on market history in progress...\nPlease wait."
-                    ml_logs_stage2.value = f"⚙️ {tr_msg or 'Сбор свечей и векторов индикаторов...'}"
-                    ml_logs_stage3.value = "🤖 Нейросеть обучается и подстраивается под рыночный тренд..." if lang == "ru" else "🤖 AI model is adapting to market trend..."
-                    ml_log_time.value = "🕐 Status: Обучение нейросети..." if lang == "ru" else "🕐 Status: AI Training..."
+                    # Идёт полное обучение нейросети
+                    ml_logs_stage1.value = "⏳ Идёт автоматическое обучение нейросети на истории рынка...\nПожалуйста, подождите." if lang == "ru" else "⏳ AI model training on market history in progress...\nPlease wait."
+                    ml_logs_stage2.value = f"⚙️ {tr_msg or 'Сбор данных и обучение...'}"
+                    ml_logs_stage3.value = "🤖 Нейросеть адаптируется под рыночный тренд. После обучения сигнал появится автоматически." if lang == "ru" else "🤖 AI is adapting to market. Signal will appear automatically after training."
+                    ml_log_time.value = "🕐 Статус: Обучение нейросети..." if lang == "ru" else "🕐 Status: Training AI..."
+                elif is_warmup:
+                    # Идёт первичный расчёт сигнала (warmup)
+                    ml_logs_stage1.value = "🔄 Выполняется первичный расчёт сигнала нейросети..." if lang == "ru" else "🔄 Running initial AI signal calculation..."
+                    ml_logs_stage2.value = "⚙️ Загрузка свечей и применение индикаторов..." if lang == "ru" else "⚙️ Loading candles and applying indicators..."
+                    ml_logs_stage3.value = "🤖 Первый сигнал появится через несколько секунд." if lang == "ru" else "🤖 First signal will appear in a few seconds."
+                    ml_log_time.value = "🕐 Статус: Первичный расчёт..." if lang == "ru" else "🕐 Status: Initial calculation..."
                 else:
-                    ml_logs_stage1.value = "⏳ Инициализация нейросети и генерация торговой стратегии..." if lang == "ru" else "⏳ Initializing AI model & generating strategy..."
-                    ml_logs_stage2.value = "⚙️ Загрузка данных свечей с биржи..." if lang == "ru" else "⚙️ Fetching candle data from exchange..."
-                    ml_logs_stage3.value = "🤖 Ожидание завершения первого расчёта сигнала..." if lang == "ru" else "🤖 Waiting for first signal calculation..."
-                    ml_log_time.value = "🕐 Status: Инициализация..." if lang == "ru" else "🕐 Status: Initializing..."
+                    # Нет ни обучения ни warmup — сигнал должен скоро прийти из фонового цикла
+                    ml_logs_stage1.value = "✅ Нейросеть загружена. Ожидание первого сигнала от торгового цикла..." if lang == "ru" else "✅ AI loaded. Waiting for first signal from trading cycle..."
+                    ml_logs_stage2.value = "⚙️ Фоновый торговый цикл анализирует рынок..." if lang == "ru" else "⚙️ Background trading cycle is analyzing the market..."
+                    ml_logs_stage3.value = "🤖 Сигнал обновляется каждые ~0.3 секунды автоматически." if lang == "ru" else "🤖 Signal updates every ~0.3s automatically."
+                    ml_log_time.value = "🕐 Статус: Анализ рынка..." if lang == "ru" else "🕐 Status: Analyzing market..."
         except Exception as e:
             if is_destroyed_session_error(e):
                 raise e
