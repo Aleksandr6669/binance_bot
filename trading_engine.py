@@ -18,6 +18,7 @@ _stop_event = threading.Event()
 _simulator_thread = None
 _bot_runner_thread = None
 LATEST_LIVE_SIGNAL = None
+BOT_STARTUP_TIME = time.time()
 
 def get_model_n_features(model):
     if hasattr(model, "num_feature") and callable(getattr(model, "num_feature")):
@@ -1423,9 +1424,11 @@ def evaluate_market_signal(persist_log=False, place_order=False):
                     except: tf_sec = 86400
                 stagnation_min_sec = tf_sec * 3
 
-                # 2. ⏳ Выход по ЗАСТОЮ ИИ (только если режим STAGNATION_AND_REVERSAL)
+                bot_uptime_sec = time.time() - BOT_STARTUP_TIME
+
+                # 2. ⏳ Выход по ЗАСТОЮ ИИ (только если режим STAGNATION_AND_REVERSAL И бот активен от 3 минут)
                 is_stagnation_exit = False
-                if ai_exit_mode == "STAGNATION_AND_REVERSAL" and order_age_sec >= stagnation_min_sec:
+                if ai_exit_mode == "STAGNATION_AND_REVERSAL" and order_age_sec >= stagnation_min_sec and bot_uptime_sec >= stagnation_min_sec:
                     pnl_pct = (current_close - entry_price) / entry_price if current_side == "BUY" else (entry_price - current_close) / entry_price
                     # Если за 3 свечи цена почти не сдвинулась в плюс
                     if abs(pnl_pct) < 0.0015 or (pnl_pct < 0.0030 and pred_change_1m <= 0.0001):
@@ -1433,9 +1436,9 @@ def evaluate_market_signal(persist_log=False, place_order=False):
                         st_candles = 3
                         exit_reason_label = f"застой цены ИИ (отсутствие роста {st_candles} свечи / {int(stagnation_min_sec/60)} мин)"
 
-                # 3. 🤖 НЕЙРОСЕТЕВАЯ МОДЕЛЬ ВЫХОДА (только при режиме STAGNATION_AND_REVERSAL)
+                # 3. 🤖 НЕЙРОСЕТЕВАЯ МОДЕЛЬ ВЫХОДА (только при режиме STAGNATION_AND_REVERSAL И бот активен от 60 сек)
                 is_neural_exit = False
-                if ai_exit_mode == "STAGNATION_AND_REVERSAL" and order_age_sec >= (tf_sec * 0.5) and not is_stagnation_exit:
+                if ai_exit_mode == "STAGNATION_AND_REVERSAL" and order_age_sec >= (tf_sec * 0.5) and bot_uptime_sec >= 60 and not is_stagnation_exit:
                     ai_exit_res = scalping_ensemble.evaluate_ai_exit_neural_decision(active_order, current_close, features)
                     if ai_exit_res.get("should_exit", False) and ai_exit_res.get("exit_prob", 0.0) >= 0.75:
                         is_neural_exit = True
@@ -1961,7 +1964,8 @@ def start_bot_scheduler():
     """
     Запускает фоновые потоки и инициализирует модели.
     """
-    global _simulator_thread, _bot_runner_thread
+    global _simulator_thread, _bot_runner_thread, BOT_STARTUP_TIME
+    BOT_STARTUP_TIME = time.time()
     
     # 1. Сброс и создание таблиц
     db.init_db()

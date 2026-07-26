@@ -1213,6 +1213,9 @@ def retrain_on_market_history(pair, timeframe):
     Позволяет нейросети учиться прямо в процессе торговли на рынке.
     """
     global training_status
+    if training_status.get("active", False):
+        logger.info(f"Самообучение для {pair.upper()} ({timeframe}) уже выполняется. Повторный запуск пропущен.")
+        return False
     training_status = {
         "active": True,
         "pair": pair.upper(),
