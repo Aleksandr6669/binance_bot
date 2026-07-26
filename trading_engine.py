@@ -809,7 +809,8 @@ def fetch_binance_klines(symbol, timeframe, limit=100, market_type="SPOT"):
     now = time.time()
     if cache_key in _klines_cache:
         cached_time, cached_data = _klines_cache[cache_key]
-        if now - cached_time < 2.0:
+        max_cache_age = 0.3 if limit <= 100 else 2.0
+        if now - cached_time < max_cache_age:
             return cached_data
             
     use_us = os.environ.get("USE_BINANCE_US", "False").lower() == "true"
@@ -863,7 +864,7 @@ def fetch_binance_klines(symbol, timeframe, limit=100, market_type="SPOT"):
     return []
 
 def fetch_current_price(symbol, market_type="SPOT"):
-    """Запрашивает текущую тикерную цену с Binance API (Spot или Futures) с кешированием на 1.0 секунду."""
+    """Запрашивает текущую тикерную цену с Binance API (Spot или Futures) с кешированием на 0.1 секунду."""
     symbol = symbol.upper()
     market_type = market_type.upper()
     cache_key = (symbol, market_type)
@@ -871,7 +872,7 @@ def fetch_current_price(symbol, market_type="SPOT"):
     
     if cache_key in _price_cache:
         cached_time, cached_price = _price_cache[cache_key]
-        if now - cached_time < 0.3:
+        if now - cached_time < 0.1:
             return cached_price
             
     try:
@@ -1847,8 +1848,8 @@ def run_automated_trading_bot():
                 pair = bot["trading_pair"]
                 timeframe = bot["timeframe"] or "1m"
                 
-                # Опрашиваем локальный кеш / Binance раз в 1.0 секунду для мгновенного входа по сигналам
-                interval_sec = 1.0
+                # Опрашиваем рынок каждые 0.3 секунды (пару раз в секунду) для мгновенного отклика
+                interval_sec = 0.3
                 last_run = last_run_times.get(user_id, 0)
                 
                 if current_time - last_run >= interval_sec:
@@ -1858,7 +1859,7 @@ def run_automated_trading_bot():
                         print(f"Error running user analysis cycle for {user_id}: {e}")
                     last_run_times[user_id] = current_time
                     
-            time.sleep(0.25)  # проверяем базу данных 4 раза в секунду для мгновенной реакции
+            time.sleep(0.1)  # опрашиваем 10 раз в секунду для мгновенной реакции
             
         except Exception as e:
             print(f"Error in automated trading bot runner: {e}")

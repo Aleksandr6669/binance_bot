@@ -464,16 +464,33 @@ def build_dashboard_view(page: ft.Page, lang: str):
             if latest_log:
                 ml_logs_stage1.value = latest_log.get("stage1_output") or "—"
                 ml_logs_stage2.value = latest_log.get("stage2_output") or "—"
-                # Format stage3 JSON nicely
+                # Format stage3 JSON nicely with INSTANT threshold re-evaluation
                 try:
                     import json as _json
                     s3 = _json.loads(latest_log.get("stage3_output") or "{}")
                     action = s3.get("action", "HOLD")
                     price = s3.get("price", 0)
                     prob = s3.get("probability", 0)
-                    reason = s3.get("reason", "")
-                    reason2 = s3.get("reason2", "")
                     order_type = s3.get("order_type", "")
+                    
+                    # Мгновенная динамическая переоценка вероятности против АКТИВНОГО порога из настроек!
+                    raw_thresh = settings.get("min_probability_threshold")
+                    curr_thresh = float(raw_thresh) if raw_thresh is not None else 0.65
+                    
+                    vol_blocked = ("BLOCKED" in (latest_log.get("stage1_output") or ""))
+                    if not vol_blocked and prob > curr_thresh:
+                        if action not in ["BUY", "SELL"]:
+                            action = "BUY"
+                        reason = "Сигнал на покупку по тренду!" if action == "BUY" else "Сигнал на продажу по тренду!"
+                        reason2 = f"Вероятность {prob:.4f} > {curr_thresh:.2f}."
+                    elif not vol_blocked:
+                        action = "HOLD"
+                        reason = "Вероятность классификатора:"
+                        reason2 = f"{prob:.4f} <= {curr_thresh:.2f}."
+                    else:
+                        reason = s3.get("reason", "")
+                        reason2 = s3.get("reason2", "")
+
                     action_icon = "🟢" if action == "BUY" else ("🔴" if action == "SELL" else "⏸")
                     t_act = t("action_lbl", lang)
                     t_ord = t("order_lbl", lang)
@@ -750,7 +767,7 @@ def build_dashboard_view(page: ft.Page, lang: str):
             print(f"Initial dashboard fetch error: {e}")
 
         while True:
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.25)
 
             # Пропускаем если не на дашборде, но не выходим
             if page.route != "/dashboard":

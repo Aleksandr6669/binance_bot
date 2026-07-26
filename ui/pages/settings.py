@@ -239,7 +239,15 @@ def build_settings_view(page: ft.Page, lang: str):
                 float(limit_offset_dd.value if limit_offset_dd.value and limit_offset_dd.value != "ai" else 1.0)
             )
             t_saved = t("settings_saved", lang)
-            # No cache invalidation needed — dashboard_refresher uses continue not break
+            
+            # Immediately trigger market re-evaluation cycle with the new threshold
+            try:
+                import threading
+                import trading_engine
+                threading.Thread(target=trading_engine.run_user_analysis_cycle, daemon=True).start()
+            except Exception as ex:
+                print(f"Error triggering instant analysis cycle after autosave: {ex}")
+
             try:
                 page.snack_bar = ft.SnackBar(
                     ft.Text(t_saved), 

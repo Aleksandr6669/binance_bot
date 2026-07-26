@@ -548,7 +548,7 @@ def build_decisions_view(page: ft.Page, lang: str):
     async def decisions_refresher():
         import asyncio
         while True:
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.25)
             if page.route != "/decisions":
                 continue
             
