@@ -797,7 +797,6 @@ def build_settings_view(page: ft.Page, lang: str):
             ft.dropdown.Option("STAGNATION_AND_REVERSAL", "Разворот + Выход по застою" if lang == "ru" else "Reversal + Stagnation Exit"),
         ],
         value=settings.get("ai_exit_mode", "STAGNATION_AND_REVERSAL"),
-        width=230,
         on_change=on_ai_exit_mode_change
     )
 
@@ -813,7 +812,6 @@ def build_settings_view(page: ft.Page, lang: str):
     stagnation_candles_dd = make_dropdown(
         options=[ft.dropdown.Option(k, v) for k, v in stagnation_candles_options],
         value=str(settings.get("stagnation_candles", 3)),
-        width=175,
         on_change=trigger_autosave_instant
     )
 
@@ -831,7 +829,6 @@ def build_settings_view(page: ft.Page, lang: str):
     stagnation_pnl_dd = make_dropdown(
         options=[ft.dropdown.Option(k, v) for k, v in stagnation_pnl_options],
         value=curr_stag_pnl_str if any(k == curr_stag_pnl_str for k, _ in stagnation_pnl_options) else "0.30",
-        width=185,
         on_change=trigger_autosave_instant
     )
 
@@ -927,26 +924,38 @@ def build_settings_view(page: ft.Page, lang: str):
                     spacing=8
                 ),
                 ft.Text("Управление логикой выхода при затишье, время ожидания импульса (в свечах) и порог профита" if lang == "ru" else "Manage stagnation exit logic, duration (in candles) and profit threshold", size=11, color="#94a3b8"),
-                ft.Row(
+                ft.ResponsiveRow(
                     [
-                        ft.Column([
-                            ft.Text("Режим выхода ИИ:" if lang == "ru" else "AI Exit Mode:", size=11, color="#f8fafc", weight=ft.FontWeight.BOLD),
-                            ai_exit_mode_dd
-                        ]),
-                        ft.Column([
-                            ft.Text("Длительность:" if lang == "ru" else "Duration:", size=11, color="#f8fafc", weight=ft.FontWeight.BOLD),
-                            stagnation_candles_dd
-                        ]),
-                        ft.Column([
-                            ft.Text("Порог PnL:" if lang == "ru" else "PnL Threshold:", size=11, color="#f8fafc", weight=ft.FontWeight.BOLD),
-                            stagnation_pnl_dd
-                        ]),
+                        ft.Column(
+                            [
+                                ft.Text("Режим выхода ИИ:" if lang == "ru" else "AI Exit Mode:", size=11, color="#f8fafc", weight=ft.FontWeight.BOLD),
+                                ai_exit_mode_dd
+                            ],
+                            col={"xs": 12, "md": 6},
+                            horizontal_alignment=ft.CrossAxisAlignment.STRETCH
+                        ),
+                        ft.Column(
+                            [
+                                ft.Text("Длительность:" if lang == "ru" else "Duration:", size=11, color="#f8fafc", weight=ft.FontWeight.BOLD),
+                                stagnation_candles_dd
+                            ],
+                            col={"xs": 12, "md": 3},
+                            horizontal_alignment=ft.CrossAxisAlignment.STRETCH
+                        ),
+                        ft.Column(
+                            [
+                                ft.Text("Порог PnL:" if lang == "ru" else "PnL Threshold:", size=11, color="#f8fafc", weight=ft.FontWeight.BOLD),
+                                stagnation_pnl_dd
+                            ],
+                            col={"xs": 12, "md": 3},
+                            horizontal_alignment=ft.CrossAxisAlignment.STRETCH
+                        ),
                     ],
                     spacing=15,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER
                 )
             ],
-            spacing=10
+            spacing=12
         ),
         bgcolor=ft.Colors.with_opacity(0.05, "#ffffff"),
         padding=15,
