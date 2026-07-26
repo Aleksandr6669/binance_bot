@@ -824,9 +824,20 @@ def fetch_binance_klines(symbol, timeframe, limit=100, market_type="SPOT"):
             return cached_data
             
     use_us = os.environ.get("USE_BINANCE_US", "False").lower() == "true"
-    url = "https://fapi.binance.com/fapi/v1/klines" if market_type == "FUTURES" else (
-        "https://api.binance.us/api/v3/klines" if use_us else "https://api.binance.com/api/v3/klines"
-    )
+    if market_type == "FUTURES":
+        urls = [
+            "https://fapi.binance.com/fapi/v1/klines",
+            "https://fapi1.binance.com/fapi/v1/klines",
+            "https://fapi2.binance.com/fapi/v1/klines",
+            "https://fapi3.binance.com/fapi/v1/klines"
+        ]
+    else:
+        urls = ["https://api.binance.us/api/v3/klines"] if use_us else [
+            "https://api.binance.com/api/v3/klines",
+            "https://api1.binance.com/api/v3/klines",
+            "https://api2.binance.com/api/v3/klines",
+            "https://api3.binance.com/api/v3/klines"
+        ]
     
     all_klines = []
     end_time = None
@@ -842,35 +853,38 @@ def fetch_binance_klines(symbol, timeframe, limit=100, market_type="SPOT"):
         if end_time:
             params["endTime"] = end_time
             
-        try:
-            res = requests.get(url, params=params, timeout=10, proxies=get_binance_proxies())
-            res.raise_for_status()
-            data = res.json()
+        data = None
+        for url in urls:
+            try:
+                res = requests.get(url, params=params, timeout=4.0, proxies=get_binance_proxies())
+                res.raise_for_status()
+                data = res.json()
+                if data:
+                    break
+            except Exception:
+                continue
+
+        if not data:
+            break
+            
+        if all_klines:
+            data = [k for k in data if k[0] < all_klines[0][0]]
             if not data:
                 break
                 
-            if all_klines:
-                data = [k for k in data if k[0] < all_klines[0][0]]
-                if not data:
-                    break
-                    
-            all_klines = data + all_klines
-            remaining -= len(data)
-            end_time = data[0][0] - 1
-            if len(data) < fetch_limit or fetch_limit < 1000:
-                break
-        except Exception as e:
-            if all_klines:
-                break
-            print(f"Error fetching klines for {symbol} ({market_type}): {e}")
-            for k_key, val in _klines_cache.items():
-                if k_key[0] == symbol and k_key[1] == timeframe and k_key[3] == market_type:
-                    return val[1]
-            raise e
-
+        all_klines = data + all_klines
+        remaining -= len(data)
+        end_time = data[0][0] - 1
+        if len(data) < fetch_limit or fetch_limit < 1000:
+            break
+            
     if all_klines:
         _klines_cache[cache_key] = (now, all_klines)
         return all_klines
+        
+    for k_key, val in _klines_cache.items():
+        if k_key[0] == symbol and k_key[1] == timeframe and k_key[3] == market_type:
+            return val[1]
     return []
 
 def fetch_current_price(symbol, market_type="SPOT"):
@@ -885,28 +899,42 @@ def fetch_current_price(symbol, market_type="SPOT"):
         if now - cached_time < 0.1:
             return cached_price
             
-    try:
-        use_us = os.environ.get("USE_BINANCE_US", "False").lower() == "true"
-        url = "https://fapi.binance.com/fapi/v1/ticker/price" if market_type == "FUTURES" else (
-            "https://api.binance.us/api/v3/ticker/price" if use_us else "https://api.binance.com/api/v3/ticker/price"
-        )
-        params = {"symbol": symbol}
-        res = requests.get(url, params=params, timeout=10, proxies=get_binance_proxies())
-        res.raise_for_status()
-        price = float(res.json()["price"])
-        _price_cache[cache_key] = (now, price)
-        return price
-    except Exception as e:
-        print(f"Error updating price for {symbol} ({market_type}): {e}")
-        # Return last cached price if available
-        if cache_key in _price_cache:
-            return _price_cache[cache_key][1]
-        # Hardcoded fallbacks if completely offline/blocked
-        if "BTC" in symbol:
-            return 60000.0
-        elif "ETH" in symbol:
-            return 1650.0
-        return 1.0
+    use_us = os.environ.get("USE_BINANCE_US", "False").lower() == "true"
+    if market_type == "FUTURES":
+        urls = [
+            "https://fapi.binance.com/fapi/v1/ticker/price",
+            "https://fapi1.binance.com/fapi/v1/ticker/price",
+            "https://fapi2.binance.com/fapi/v1/ticker/price",
+            "https://fapi3.binance.com/fapi/v1/ticker/price"
+        ]
+    else:
+        urls = ["https://api.binance.us/api/v3/ticker/price"] if use_us else [
+            "https://api.binance.com/api/v3/ticker/price",
+            "https://api1.binance.com/api/v3/ticker/price",
+            "https://api2.binance.com/api/v3/ticker/price",
+            "https://api3.binance.com/api/v3/ticker/price"
+        ]
+    
+    params = {"symbol": symbol}
+    for url in urls:
+        try:
+            res = requests.get(url, params=params, timeout=3.0, proxies=get_binance_proxies())
+            res.raise_for_status()
+            price = float(res.json()["price"])
+            _price_cache[cache_key] = (now, price)
+            return price
+        except Exception:
+            continue
+
+    # Return last cached price if available
+    if cache_key in _price_cache:
+        return _price_cache[cache_key][1]
+    # Hardcoded fallbacks if completely offline/blocked
+    if "BTC" in symbol:
+        return 60000.0
+    elif "ETH" in symbol:
+        return 1650.0
+    return 1.0
 
 def send_notification(message):
     """
