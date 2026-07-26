@@ -19,6 +19,15 @@ _simulator_thread = None
 _bot_runner_thread = None
 LATEST_LIVE_SIGNAL = None
 
+def get_model_n_features(model):
+    if hasattr(model, "num_feature") and callable(getattr(model, "num_feature")):
+        return model.num_feature()
+    elif hasattr(model, "num_features"):
+        return model.num_features
+    elif hasattr(model, "n_features_in_"):
+        return model.n_features_in_
+    return 12
+
 # Хранилище буферов свечей для каждого пользователя: user_id -> deque(maxlen=100)
 _user_buffers = {}
 
@@ -1101,8 +1110,13 @@ def run_user_scalping_cycle():
             pred_change_2m,
             current_hour,
             current_row.get("vwap_dist", 0.0),
-            current_row.get("macd_hist_norm", 0.0)
+            current_row.get("macd_hist_norm", 0.0),
+            current_row.get("bb_dist", 0.5),
+            current_row.get("vol_surge", 1.0),
+            current_row.get("wick_ratio", 0.0)
         ]])
+        n_expected = get_model_n_features(scalping_ensemble.classifier_model)
+        features = features[:, :n_expected]
         
         prob = scalping_ensemble.classifier_model.predict(features)[0]
         
@@ -1297,8 +1311,13 @@ def evaluate_market_signal(persist_log=False, place_order=False):
             pred_change_2m,
             current_hour,
             current_row.get("vwap_dist", 0.0),
-            current_row.get("macd_hist_norm", 0.0)
+            current_row.get("macd_hist_norm", 0.0),
+            current_row.get("bb_dist", 0.5),
+            current_row.get("vol_surge", 1.0),
+            current_row.get("wick_ratio", 0.0)
         ]])
+        n_expected = get_model_n_features(scalping_ensemble.classifier_model)
+        features = features[:, :n_expected]
 
         raw_prob = float(scalping_ensemble.classifier_model.predict(features)[0])
         prob = scalping_ensemble.calibrate_probability(raw_prob)

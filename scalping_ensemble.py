@@ -720,7 +720,33 @@ def calculate_indicators(df, rsi_period=14, atr_period=14, timeframe="1m", **kwa
     except Exception:
         df['macd_hist_norm'] = 0.0
 
-    # 3. Расчет EMA тренда (ema_trend = EMA 1000)
+    # 4. Расчет Bollinger Bands Position (bb_dist)
+    try:
+        sma20 = df['close'].rolling(window=20, min_periods=1).mean()
+        std20 = df['close'].rolling(window=20, min_periods=1).std().fillna(0) + 1e-10
+        upper_bb = sma20 + 2.0 * std20
+        lower_bb = sma20 - 2.0 * std20
+        df['bb_dist'] = np.clip((df['close'] - lower_bb) / (upper_bb - lower_bb + 1e-10), 0.0, 1.0)
+    except Exception:
+        df['bb_dist'] = 0.5
+
+    # 5. Расчет Volume Surge Ratio (vol_surge)
+    try:
+        vol_sma20 = df['volume'].rolling(window=20, min_periods=1).mean() + 1e-10
+        df['vol_surge'] = np.clip(df['volume'] / vol_sma20, 0.1, 10.0)
+    except Exception:
+        df['vol_surge'] = 1.0
+
+    # 6. Расчет Candlestick Wick / Shadow Ratio (wick_ratio)
+    try:
+        candle_range = (df['high'] - df['low']).abs() + 1e-10
+        upper_wick = df['high'] - df[['open', 'close']].max(axis=1)
+        lower_wick = df[['open', 'close']].min(axis=1) - df['low']
+        df['wick_ratio'] = np.clip((upper_wick - lower_wick) / candle_range, -1.0, 1.0)
+    except Exception:
+        df['wick_ratio'] = 0.0
+
+    # 7. Расчет EMA тренда (ema_trend = EMA 1000)
     df['ema_trend'] = df['close'].ewm(span=1000, adjust=False).mean()
         
     return df
@@ -967,7 +993,7 @@ def train_models(df):
     # Список колонок-фичей для классификатора и трейлинга
     feature_cols = [
         'rsi_norm', 'atr_pct', 'obi', 'cvd', 'dlinear_pred_1m', 'dlinear_pred_2m', 'hour_feature',
-        'vwap_dist', 'macd_hist_norm'
+        'vwap_dist', 'macd_hist_norm', 'bb_dist', 'vol_surge', 'wick_ratio'
     ]
     
     # Убираем пропуски перед обучением
@@ -1296,7 +1322,7 @@ def _retrain_on_market_history_inner(pair, timeframe):
     # 5. Переобучаем/дообучаем классификатор и ИИ-трейлинг
     feature_cols = [
         'rsi_norm', 'atr_pct', 'obi', 'cvd', 'dlinear_pred_1m', 'dlinear_pred_2m', 'hour_feature',
-        'vwap_dist', 'macd_hist_norm'
+        'vwap_dist', 'macd_hist_norm', 'bb_dist', 'vol_surge', 'wick_ratio'
     ]
     
     # Расчет таргета для ИИ-трейлинга
@@ -1676,7 +1702,7 @@ def _bootstrap_virtual_training_inner(pair, timeframe):
     
     feature_cols = [
         'rsi_norm', 'atr_pct', 'obi', 'cvd', 'dlinear_pred_1m', 'dlinear_pred_2m', 'hour_feature',
-        'vwap_dist', 'macd_hist_norm'
+        'vwap_dist', 'macd_hist_norm', 'bb_dist', 'vol_surge', 'wick_ratio'
     ]
     
     training_status["msg"] = f"Обучение {pair.upper()} ({timeframe}) [4/5]: ⚡ Симуляция виртуальных ордеров TP/SL и загрузка логов из БД..."
