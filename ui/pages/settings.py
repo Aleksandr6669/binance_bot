@@ -784,11 +784,19 @@ def build_settings_view(page: ft.Page, lang: str):
         page.update()
         trigger_autosave_instant()
 
-    def on_ai_exit_mode_change(e):
-        is_stagnation = (ai_exit_mode_dd.value == "STAGNATION_AND_REVERSAL")
-        stagnation_candles_dd.disabled = not is_stagnation
-        stagnation_pnl_dd.disabled = not is_stagnation
-        page.update()
+    def update_ai_exit_controls_state(e=None):
+        is_ai_exit_active = use_ai_exit_sw.value
+        is_stagnation_mode = (ai_exit_mode_dd.value == "STAGNATION_AND_REVERSAL")
+        
+        ai_exit_mode_dd.disabled = not is_ai_exit_active
+        stagnation_candles_dd.disabled = not (is_ai_exit_active and is_stagnation_mode)
+        stagnation_pnl_dd.disabled = not (is_ai_exit_active and is_stagnation_mode)
+        stagnation_control_box.opacity = 1.0 if is_ai_exit_active else 0.4
+        
+        try:
+            page.update()
+        except Exception:
+            pass
         trigger_autosave_instant()
 
     ai_exit_mode_dd = make_dropdown(
@@ -797,7 +805,7 @@ def build_settings_view(page: ft.Page, lang: str):
             ft.dropdown.Option("STAGNATION_AND_REVERSAL", "Разворот + Выход по застою" if lang == "ru" else "Reversal + Stagnation Exit"),
         ],
         value=settings.get("ai_exit_mode", "STAGNATION_AND_REVERSAL"),
-        on_change=on_ai_exit_mode_change
+        on_change=update_ai_exit_controls_state
     )
 
     stagnation_candles_options = [
@@ -832,13 +840,9 @@ def build_settings_view(page: ft.Page, lang: str):
         on_change=trigger_autosave_instant
     )
 
-    is_stagnation_init = (settings.get("ai_exit_mode", "STAGNATION_AND_REVERSAL") == "STAGNATION_AND_REVERSAL")
-    stagnation_candles_dd.disabled = not is_stagnation_init
-    stagnation_pnl_dd.disabled = not is_stagnation_init
-
     use_limit_sw = ft.Switch(value=is_limit_active, on_change=on_limit_change)
     use_ai_limit_sw = ft.Switch(value=settings.get("use_ai_limit_price", 0) == 1, on_change=trigger_autosave_instant)
-    use_ai_exit_sw = ft.Switch(value=settings.get("use_ai_exit", 0) == 1, on_change=trigger_autosave_instant)
+    use_ai_exit_sw = ft.Switch(value=settings.get("use_ai_exit", 0) == 1, on_change=update_ai_exit_controls_state)
     
     # Trailing Stop components
     def on_trailing_change(e):
@@ -962,6 +966,14 @@ def build_settings_view(page: ft.Page, lang: str):
         border_radius=8,
         border=ft.Border.all(1, ft.Colors.TRANSPARENT)
     )
+
+    # Initialize initial state for AI Exit controls and stagnation box
+    is_ai_exit_init = use_ai_exit_sw.value
+    is_stagnation_init = (ai_exit_mode_dd.value == "STAGNATION_AND_REVERSAL")
+    ai_exit_mode_dd.disabled = not is_ai_exit_init
+    stagnation_candles_dd.disabled = not (is_ai_exit_init and is_stagnation_init)
+    stagnation_pnl_dd.disabled = not (is_ai_exit_init and is_stagnation_init)
+    stagnation_control_box.opacity = 1.0 if is_ai_exit_init else 0.4
 
     trailing_stop_box = ft.Container(
         content=ft.Row(
