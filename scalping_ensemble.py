@@ -651,7 +651,7 @@ def delete_model_file(pair, timeframe):
 # =====================================================================
 # 4. ФУНКЦИИ ВЫЧИСЛЕНИЯ ТЕХНИЧЕСКИХ ИНДИКАТОРОВ
 # =====================================================================
-def calculate_indicators(df, rsi_period=14, atr_period=14):
+def calculate_indicators(df, rsi_period=14, atr_period=14, timeframe="1m", **kwargs):
     """
     Вычисляет технические индикаторы: RSI (нормированный от 0 до 1)
     и ATR_pct (в процентах от цены закрытия для стационарности).
@@ -1495,6 +1495,21 @@ def calibrate_probability(raw_p, p_95=0.40):
         return float(np.clip(0.65 + (ratio - 0.75) / 0.25 * 0.20, 0.10, 0.85))
     else:
         return float(np.clip(ratio / 0.75 * 0.65, 0.05, 0.65))
+
+def get_adaptive_ema_span(tf="1m"):
+    """Возвращает адаптивный период EMA в зависимости от таймфрейма."""
+    tf_str = str(tf).lower()
+    if tf_str == "1m":
+        return 200
+    elif tf_str == "3m":
+        return 100
+    elif tf_str == "5m":
+        return 50
+    elif tf_str == "15m":
+        return 30
+    elif tf_str == "30m":
+        return 20
+    return 200
 
 def load_real_execution_feedback(df, pair, timeframe, feature_cols):
     extra_X, extra_y = [], []

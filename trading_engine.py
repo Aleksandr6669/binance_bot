@@ -1101,10 +1101,7 @@ def run_user_scalping_cycle():
             pred_change_2m,
             current_hour,
             current_row.get("vwap_dist", 0.0),
-            current_row.get("macd_hist_norm", 0.0),
-            current_row.get("bb_dist", 0.5),
-            current_row.get("vol_surge", 1.0),
-            current_row.get("wick_ratio", 0.0)
+            current_row.get("macd_hist_norm", 0.0)
         ]])
         
         prob = scalping_ensemble.classifier_model.predict(features)[0]
@@ -1245,6 +1242,8 @@ def evaluate_market_signal(persist_log=False, place_order=False):
             "low": float(k[3]),
             "close": float(k[4]),
             "volume": float(k[5]),
+            "obi": np.clip(np.random.normal(0, 0.1), -1.0, 1.0),
+            "cvd": np.random.normal(0, 50.0)
         } for k in klines])
 
         df = scalping_ensemble.calculate_indicators(df, timeframe=timeframe)
@@ -1254,8 +1253,8 @@ def evaluate_market_signal(persist_log=False, place_order=False):
         current_rsi_norm = current_row["rsi_norm"]
         current_atr_pct = current_row["atr_pct"]
         current_atr = current_row["atr"]
-        current_obi = current_row["obi"]
-        current_cvd = current_row["cvd"]
+        current_obi = current_row.get("obi", 0.0)
+        current_cvd = current_row.get("cvd", 0.0)
 
         hour_window = min(60, len(df))
         mean_hourly_atr = df["atr"].iloc[-hour_window:].mean()
@@ -1298,10 +1297,7 @@ def evaluate_market_signal(persist_log=False, place_order=False):
             pred_change_2m,
             current_hour,
             current_row.get("vwap_dist", 0.0),
-            current_row.get("macd_hist_norm", 0.0),
-            current_row.get("bb_dist", 0.5),
-            current_row.get("vol_surge", 1.0),
-            current_row.get("wick_ratio", 0.0)
+            current_row.get("macd_hist_norm", 0.0)
         ]])
 
         raw_prob = float(scalping_ensemble.classifier_model.predict(features)[0])
