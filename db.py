@@ -4,49 +4,14 @@ import threading
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading_bot.db")
 
-HF_REPO_ID = "Gabreil666/binanceaibot"
-
 def download_db_from_hf():
-    """Скачивает актуальную SQLite БД с HuggingFace при запуске."""
-    try:
-        from huggingface_hub import hf_hub_download
-        token = os.environ.get("HF_TOKEN")
-        downloaded = hf_hub_download(
-            repo_id=HF_REPO_ID,
-            filename="trading_bot.db",
-            repo_type="space",
-            token=token
-        )
-        if downloaded and os.path.exists(downloaded) and os.path.abspath(downloaded) != os.path.abspath(DB_PATH):
-            import shutil
-            shutil.copy(downloaded, DB_PATH)
-            print("✅ Актуальная база данных успешно загружена с HuggingFace Space!")
-            return True
-    except Exception as e:
-        print(f"HF DB Download info: {e}")
     return False
 
 def upload_db_to_hf():
-    """Выгружает свежую SQLite БД на HuggingFace Space."""
-    try:
-        from huggingface_hub import HfApi
-        token = os.environ.get("HF_TOKEN")
-        api = HfApi(token=token)
-        if os.path.exists(DB_PATH):
-            api.upload_file(
-                path_or_fileobj=DB_PATH,
-                path_in_repo="trading_bot.db",
-                repo_id=HF_REPO_ID,
-                repo_type="space"
-            )
-            return True
-    except Exception as e:
-        print(f"HF DB Upload info: {e}")
     return False
 
 def upload_db_to_hf_async():
-    """Фоновая асинхронная выгрузка БД на HuggingFace."""
-    threading.Thread(target=upload_db_to_hf, daemon=True).start()
+    pass
 
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH, timeout=15.0)
