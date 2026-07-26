@@ -1383,7 +1383,23 @@ def evaluate_market_signal(persist_log=False, place_order=False):
             except Exception as e:
                 print(f"Failed to persist analysis log (non-fatal): {e}")
 
-        # Stagnation retrain отключён — ретрейн только после убытка и по расписанию (1 раз в час).
+        # Проверка кулдауна после закрытия сделки ИИ (чтобы не переоткрывать одну и ту же позицию подряд каждые 2 сек)
+        is_cooldown_active = False
+        try:
+            recent_closed = db.get_orders(limit=10)
+            for ro in recent_closed:
+                if ro.get("pair", "").upper() == pair.upper() and ro.get("side", "").upper() == action:
+                    c_status = str(ro.get("status", "")).upper()
+                    if c_status in ["CLOSED_MANUAL", "CLOSED_TP", "CLOSED_SL"]:
+                        c_at = ro.get("closed_at") or ro.get("created_at")
+                        if c_at:
+                            c_dt = pd.to_datetime(c_at)
+                            elapsed_sec = (pd.Timestamp.now() - c_dt).total_seconds()
+                            if elapsed_sec < 180: # 3 минуты паузы на повторный вход в ту же сторону
+                                is_cooldown_active = True
+                                break
+        except Exception as cd_ex:
+            print(f"Error checking exit cooldown: {cd_ex}")
 
         order_msg = "Рекомендация: HOLD (нет сигнала на вход)."
         if vol_blocked:
@@ -1411,7 +1427,7 @@ def evaluate_market_signal(persist_log=False, place_order=False):
                 
                 # 2. 🤖 100% НЕЙРОСЕТЕВАЯ МОДЕЛЬ ВЫХОДА (NumPyAIExitModel на 14 признаках)
                 is_neural_exit = False
-                if order_age_sec >= 15:
+                if order_age_sec >= 30:
                     ai_exit_res = scalping_ensemble.evaluate_ai_exit_neural_decision(active_order, current_close, features)
                     if ai_exit_res.get("should_exit", False):
                         is_neural_exit = True
@@ -1523,12 +1539,15 @@ def evaluate_market_signal(persist_log=False, place_order=False):
                 else:
                     order_msg = f"Позиция по {pair} уже открыта. Анализ продолжается."
         elif action in ["BUY", "SELL"] and place_order:
-            order_type_desc = "лимитный" if use_limit_orders else "рыночный"
-            if trading_mode == "LIVE":
-                order_msg = f"Размещен LIVE {order_type_desc} ордер {action} на Binance по паре {pair} ({market_type})!"
+            if is_cooldown_active:
+                order_msg = f"Сигнал {action} активен, но повторный вход заблокирован паузой (3 мин кулдаун после закрытия ИИ)."
             else:
-                order_msg = f"Размещен DEMO {order_type_desc} ордер {action} по паре {pair} ({market_type})!"
-            place_scalping_order(pair, current_close, trading_mode, order_size_usdt, market_type, futures_leverage, current_atr, side=action, prob=prob, pred_change_1m=pred_change_1m)
+                order_type_desc = "лимитный" if use_limit_orders else "рыночный"
+                if trading_mode == "LIVE":
+                    order_msg = f"Размещен LIVE {order_type_desc} ордер {action} на Binance по паре {pair} ({market_type})!"
+                else:
+                    order_msg = f"Размещен DEMO {order_type_desc} ордер {action} по паре {pair} ({market_type})!"
+                place_scalping_order(pair, current_close, trading_mode, order_size_usdt, market_type, futures_leverage, current_atr, side=action, prob=prob, pred_change_1m=pred_change_1m)
 
         # Подготавливаем последний лог для передачи в websocket (не обязательно сохранять в БД)
         created_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")

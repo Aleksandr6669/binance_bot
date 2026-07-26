@@ -444,8 +444,8 @@ def evaluate_ai_exit_neural_decision(active_order, current_close, features):
         # 🤖 ИИ-НЕЙРОСЕТЕВОЙ ИНФЕРЕНС
         exit_prob = float(ai_exit_model.predict(full_exit_features))
 
-        # Нейросеть выносит решение на выход при уверенности ИИ > 0.55
-        should_exit = exit_prob >= 0.55
+        # Нейросеть выносит решение на выход при уверенности ИИ > 0.70 и возрасте сделки > 30 сек
+        should_exit = (exit_prob >= 0.70) and (order_age_min >= 0.5)
         reason = f"Нейросеть выходов (уверенность ИИ в закрытии: {exit_prob*100:.1f}%)"
 
         return {
