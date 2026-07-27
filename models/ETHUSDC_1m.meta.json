@@ -3,27 +3,30 @@
   "timeframe": "1m",
   "classifier_type": "LightGBM (Gradient Boosting)",
   "candles_count": 216806,
-  "feedback_count": 3383,
-  "loss": 3.158069558849938e-05,
+  "feedback_count": 3425,
+  "loss": 0.0001079765616573039,
   "virtual_stats": {
-    "total": 0,
-    "wins": 0,
+    "total": 4,
+    "wins": 4,
     "losses": 0,
-    "winrate": 0.0
+    "winrate": 100.0,
+    "pnl_pct": 1.14,
+    "threshold": 0.88
   },
   "val_stats": {
-    "total": 0,
-    "wins": 0,
+    "total": 2,
+    "wins": 2,
     "losses": 0,
-    "winrate": 0.0,
-    "pnl_pct": 0.0
+    "winrate": 100.0,
+    "pnl_pct": 0.04,
+    "threshold": 0.88
   },
   "real_stats": {
-    "total": 346,
-    "wins": 83,
-    "losses": 211,
-    "winrate": 24.0
+    "total": 356,
+    "wins": 86,
+    "losses": 218,
+    "winrate": 24.2
   },
-  "mtime": "2026-07-26 21:47:43",
-  "size_mb": 32.81
+  "mtime": "2026-07-26 23:07:10",
+  "size_mb": 32.84
 }

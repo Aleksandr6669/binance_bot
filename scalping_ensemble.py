@@ -700,6 +700,20 @@ def get_models_metadata_list():
                     meta = json.load(f_meta)
                     meta["filename"] = filename
                     meta["filepath"] = filepath
+                    if not meta.get("candles_count"):
+                        try:
+                            conn = db.get_db_connection()
+                            c_cnt = conn.execute(
+                                "SELECT COUNT(*) FROM market_candles WHERE pair = ? AND timeframe = ?",
+                                (pair.upper(), timeframe)
+                            ).fetchone()[0]
+                            conn.close()
+                            if c_cnt > 0:
+                                meta["candles_count"] = c_cnt
+                                with open(meta_filepath, "w", encoding="utf-8") as f_meta_w:
+                                    json.dump(meta, f_meta_w, ensure_ascii=False, indent=2)
+                        except Exception:
+                            pass
                     result.append(meta)
                     continue
             except Exception:
@@ -726,6 +740,18 @@ def get_models_metadata_list():
                 with open(filepath, "rb") as f:
                     data = pickle.load(f)
                     candles_count = len(data.get("db_market_candles", []))
+                    if candles_count == 0:
+                        try:
+                            conn = db.get_db_connection()
+                            c_cnt = conn.execute(
+                                "SELECT COUNT(*) FROM market_candles WHERE pair = ? AND timeframe = ?",
+                                (pair.upper(), timeframe)
+                            ).fetchone()[0]
+                            conn.close()
+                            if c_cnt > 0:
+                                candles_count = c_cnt
+                        except Exception:
+                            pass
                     feedback_count = len(data.get("db_analysis_logs", []))
                     clf = data.get("classifier")
                     dl = data.get("dlinear")
@@ -1283,6 +1309,19 @@ def _retrain_on_market_history_inner(pair, timeframe):
         logger.info("Не удалось получить свечи с Binance. Пропускаем.")
         return False
 
+    # Сохраняем свечи с Binance в SQLite базу данных
+    try:
+        c_conn = db.get_db_connection()
+        for k in raw_klines:
+            c_conn.execute(
+                "INSERT OR IGNORE INTO market_candles (pair, timeframe, open_time, open, high, low, close, volume) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (pair.upper(), timeframe, int(k[0]), float(k[1]), float(k[2]), float(k[3]), float(k[4]), float(k[5]))
+            )
+        c_conn.commit()
+        c_conn.close()
+    except Exception as db_wr_ex:
+        logger.warning(f"Не удалось записать свечи дообучения в БД: {db_wr_ex}")
+
     # Преобразуем в словарь для дедупликации
     candles_dict = {
         int(k[0]): {
@@ -1794,7 +1833,20 @@ def _bootstrap_virtual_training_inner(pair, timeframe):
     if not raw_klines or len(raw_klines) < 150:
         logger.warning("Недостаточно свечей с Binance для запуска симуляции.")
         return False
-        
+
+    # Сохраняем загруженные свечи в базу данных SQLite для истории
+    try:
+        c_conn = db.get_db_connection()
+        for k in raw_klines:
+            c_conn.execute(
+                "INSERT OR IGNORE INTO market_candles (pair, timeframe, open_time, open, high, low, close, volume) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (pair.upper(), timeframe, int(k[0]), float(k[1]), float(k[2]), float(k[3]), float(k[4]), float(k[5]))
+            )
+        c_conn.commit()
+        c_conn.close()
+    except Exception as db_wr_ex:
+        logger.warning(f"Не удалось записать свечи виртуального обучения в БД: {db_wr_ex}")
+
     df_list = []
     for k in raw_klines:
         df_list.append({

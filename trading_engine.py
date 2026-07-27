@@ -8,7 +8,7 @@ import hmac
 import hashlib
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 import db
 import scalping_ensemble
@@ -1435,7 +1435,6 @@ def evaluate_market_signal(persist_log=False, place_order=False):
                 order_age_sec = 0.0
                 if order_created_at:
                     try:
-                        from datetime import datetime, timezone
                         if isinstance(order_created_at, str):
                             o_dt = datetime.strptime(order_created_at.split(".")[0], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
                         else:
@@ -1700,7 +1699,6 @@ def run_market_simulator():
                         
                         # Compare with order creation time (UTC string) to avoid retro-active triggering
                         try:
-                            from datetime import timezone
                             created_dt = datetime.strptime(order["created_at"], "%Y-%m-%d %H:%M:%S")
                             order_created_ms = int(created_dt.replace(tzinfo=timezone.utc).timestamp() * 1000)
                         except Exception as dt_ex:

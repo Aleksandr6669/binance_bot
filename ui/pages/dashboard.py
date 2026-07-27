@@ -33,6 +33,21 @@ def build_dashboard_view(page: ft.Page, lang: str):
     bot_toggle_btn_text = ft.Text("Start Bot", color="#ffffff")
     bot_toggle_btn = ft.ElevatedButton(content=bot_toggle_btn_text, bgcolor="#0284c7")
 
+    # AI Live Widget Controls (for Bot Management Card)
+    ai_live_action_text = ft.Text("⏸ НЕЙТРАЛЬНО", size=11, weight=ft.FontWeight.BOLD, color="#94a3b8")
+    ai_live_action_badge = ft.Container(
+        content=ai_live_action_text,
+        padding=ft.Padding.symmetric(vertical=2, horizontal=7),
+        border_radius=6,
+        bgcolor=ft.Colors.with_opacity(0.12, "#94a3b8"),
+        border=ft.Border.all(1, ft.Colors.with_opacity(0.25, "#94a3b8"))
+    )
+    ai_live_clock_text = ft.Text("⏱ 00:00:00 LIVE", size=10, weight=ft.FontWeight.BOLD, color="#10b981")
+    ai_live_trend_text = ft.Text("📊 Тренд: —  ⚡ ATR: —", size=11, weight=ft.FontWeight.W_500, color="#94a3b8")
+    ai_live_confidence_text = ft.Text("Уверенность: 0.0%", size=12, weight=ft.FontWeight.BOLD, color="#f8fafc")
+    ai_live_threshold_text = ft.Text("Порог: 65.0%", size=11, color="#94a3b8")
+    ai_live_progress_bar = ft.ProgressBar(value=0.0, color="#10b981", bgcolor=ft.Colors.with_opacity(0.1, "#ffffff"), height=4, border_radius=2)
+
     t_chart = t("price_chart", lang)
     t_ai_strat = t("ai_strategy", lang)
     t_wait_data = t("waiting_data", lang)
@@ -452,27 +467,39 @@ def build_dashboard_view(page: ft.Page, lang: str):
         except Exception as ex:
             pass
 
-        # 5. Логи ИИ (ТОЛЬКО 100% Живой расчет в реальном времени из ОЗУ!)
+        # 5. Логи ИИ и динамический живой виджет аналитики ИИ (~3 раза/сек)
         try:
             latest_log = trading_engine.LATEST_LIVE_SIGNAL
             source_desc = "Live prediction"
             
+            raw_thresh = settings.get("min_probability_threshold")
+            curr_thresh = float(raw_thresh) if raw_thresh is not None else 0.65
+            thresh_pct = curr_thresh * 100.0
+            
             if latest_log:
                 ml_logs_stage1.value = latest_log.get("stage1_output") or "—"
                 ml_logs_stage2.value = latest_log.get("stage2_output") or "—"
-                # Format stage3 JSON nicely with INSTANT threshold re-evaluation
                 try:
                     import json as _json
                     s3 = _json.loads(latest_log.get("stage3_output") or "{}")
                     action = s3.get("action", "HOLD")
                     price = s3.get("price", 0)
-                    prob = s3.get("probability", 0)
+                    prob = float(s3.get("probability", 0.0))
                     order_type = s3.get("order_type", "")
                     
-                    # Мгновенная динамическая переоценка вероятности против АКТИВНОГО порога из настроек!
-                    raw_thresh = settings.get("min_probability_threshold")
-                    curr_thresh = float(raw_thresh) if raw_thresh is not None else 0.65
-                    
+                    # Обновление живых часиков реального времени
+                    try:
+                        curr_clock_str = datetime.now(user_tz).strftime("%H:%M:%S")
+                        ai_live_clock_text.value = f"⏱ {curr_clock_str} LIVE"
+                    except Exception:
+                        pass
+
+                    # Обновление средних аналитик (Тренд / ATR)
+                    stage1_text = latest_log.get("stage1_output") or ""
+                    trend_str = "UP 🟢" if "Filter: UP" in stage1_text else ("DOWN 🔴" if "Filter: DOWN" in stage1_text else "—")
+                    vol_str = "OK 🟢" if "Volatility Filter: OK" in stage1_text else "BLOCKED ⚠️"
+                    ai_live_trend_text.value = f"📊 Тренд: {trend_str}    ⚡ ATR: {vol_str}"
+
                     vol_blocked = ("BLOCKED" in (latest_log.get("stage1_output") or ""))
                     if not vol_blocked and prob > curr_thresh:
                         if action not in ["BUY", "SELL"]:
@@ -499,6 +526,29 @@ def build_dashboard_view(page: ft.Page, lang: str):
                         f"📊  {t_prob}{prob*100:.2f}%\n"
                         f"📝  {reason} {reason2}"
                     )
+
+                    # Обновление динамического живого виджета ИИ
+                    prob_pct = prob * 100.0
+                    if action == "BUY":
+                        act_label = "🟢 ПОКУПКА"
+                        act_color = "#10b981"
+                    elif action == "SELL":
+                        act_label = "🔴 ПРОДАЖА"
+                        act_color = "#ef4444"
+                    else:
+                        act_label = "⏸ НЕЙТРАЛЬНО"
+                        act_color = "#94a3b8"
+
+                    ai_live_action_text.value = act_label
+                    ai_live_action_text.color = act_color
+                    ai_live_action_badge.bgcolor = ft.Colors.with_opacity(0.15, act_color)
+                    ai_live_action_badge.border = ft.Border.all(1, ft.Colors.with_opacity(0.35, act_color))
+
+                    ai_live_confidence_text.value = f"Уверенность: {prob_pct:.1f}%"
+                    ai_live_threshold_text.value = f"Порог: {thresh_pct:.1f}%"
+                    ai_live_progress_bar.value = min(1.0, max(0.0, prob))
+                    ai_live_progress_bar.color = act_color
+
                 except Exception:
                     ml_logs_stage3.value = latest_log.get("stage3_output") or "—"
                 
@@ -510,25 +560,44 @@ def build_dashboard_view(page: ft.Page, lang: str):
                 is_tr_active = scalping_ensemble.training_status.get("active", False)
                 tr_msg = scalping_ensemble.training_status.get("msg", "")
                 is_warmup = getattr(trading_engine, "WARMUP_IN_PROGRESS", False)
+
+                try:
+                    curr_clock_str = datetime.now(user_tz).strftime("%H:%M:%S")
+                    ai_live_clock_text.value = f"⏱ {curr_clock_str} LIVE"
+                except Exception:
+                    pass
                 
                 if is_tr_active:
-                    # Идёт полное обучение нейросети
                     ml_logs_stage1.value = "⏳ Идёт автоматическое обучение нейросети на истории рынка...\nПожалуйста, подождите." if lang == "ru" else "⏳ AI model training on market history in progress...\nPlease wait."
                     ml_logs_stage2.value = f"⚙️ {tr_msg or 'Сбор данных и обучение...'}"
                     ml_logs_stage3.value = "🤖 Нейросеть адаптируется под рыночный тренд. После обучения сигнал появится автоматически." if lang == "ru" else "🤖 AI is adapting to market. Signal will appear automatically after training."
                     ml_log_time.value = "🕐 Статус: Обучение нейросети..." if lang == "ru" else "🕐 Status: Training AI..."
+                    
+                    ai_live_action_text.value = "⚙️ ОБУЧЕНИЕ..."
+                    ai_live_action_text.color = "#f59e0b"
+                    ai_live_confidence_text.value = "Уверенность: —"
+                    ai_live_threshold_text.value = f"Порог: {thresh_pct:.1f}%"
                 elif is_warmup:
-                    # Идёт первичный расчёт сигнала (warmup)
                     ml_logs_stage1.value = "🔄 Выполняется первичный расчёт сигнала нейросети..." if lang == "ru" else "🔄 Running initial AI signal calculation..."
                     ml_logs_stage2.value = "⚙️ Загрузка свечей и применение индикаторов..." if lang == "ru" else "⚙️ Loading candles and applying indicators..."
                     ml_logs_stage3.value = "🤖 Первый сигнал появится через несколько секунд." if lang == "ru" else "🤖 First signal will appear in a few seconds."
                     ml_log_time.value = "🕐 Статус: Первичный расчёт..." if lang == "ru" else "🕐 Status: Initial calculation..."
+
+                    ai_live_action_text.value = "🔄 РАСЧЁТ..."
+                    ai_live_action_text.color = "#38bdf8"
+                    ai_live_confidence_text.value = "Уверенность: —"
+                    ai_live_threshold_text.value = f"Порог: {thresh_pct:.1f}%"
                 else:
-                    # Нет ни обучения ни warmup — сигнал должен скоро прийти из фонового цикла
                     ml_logs_stage1.value = "✅ Нейросеть загружена. Ожидание первого сигнала от торгового цикла..." if lang == "ru" else "✅ AI loaded. Waiting for first signal from trading cycle..."
                     ml_logs_stage2.value = "⚙️ Фоновый торговый цикл анализирует рынок..." if lang == "ru" else "⚙️ Background trading cycle is analyzing the market..."
                     ml_logs_stage3.value = "🤖 Сигнал обновляется каждые ~0.3 секунды автоматически." if lang == "ru" else "🤖 Signal updates every ~0.3s automatically."
                     ml_log_time.value = "🕐 Статус: Анализ рынка..." if lang == "ru" else "🕐 Status: Analyzing market..."
+
+                    ai_live_action_text.value = "⏳ АНАЛИЗ..."
+                    ai_live_action_text.color = "#0284c7"
+                    ai_live_confidence_text.value = "Уверенность: —"
+                    ai_live_threshold_text.value = f"Порог: {thresh_pct:.1f}%"
+                    ai_live_status_text.value = "Сбор данных и расчет ИИ..."
         except Exception as e:
             if is_destroyed_session_error(e):
                 raise e
@@ -890,24 +959,71 @@ def build_dashboard_view(page: ft.Page, lang: str):
         height=190
     )
 
-    # Карта управления ботом
-    bot_card = make_glass_card(
-        ft.Column(
-            [
-                ft.Row([ft.Icon(ft.Icons.SMART_TOY_ROUNDED, color="#0284c7"), ft.Text("Управление ботом", size=16, weight=ft.FontWeight.BOLD, color="#f8fafc")]),
-                bot_status_label,
-                bot_status_desc,
-                ft.Row(
-                    [
-                        bot_toggle_btn,
-                    ],
-                    spacing=10,
-                    alignment=ft.MainAxisAlignment.START
-                )
-            ],
-            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-            expand=True
+    # Виджет ИИ сигнала в реальном времени (4 четкие строчки без обрезки текста)
+    ai_live_container = ft.Column([
+        # Строчка 1: Заголовок ИИ + Живые часики
+        ft.Row([
+            ft.Row([
+                ft.Icon(ft.Icons.PSYCHOLOGY_ROUNDED, size=15, color="#a78bfa"),
+                ft.Text("ИИ АНАЛИЗ", size=11, weight=ft.FontWeight.BOLD, color="#a78bfa")
+            ], spacing=4),
+            ft.Container(
+                content=ai_live_clock_text,
+                bgcolor=ft.Colors.with_opacity(0.1, "#10b981"),
+                border_radius=4,
+                padding=ft.Padding.symmetric(vertical=1, horizontal=6)
+            )
+        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+        
+        # Строчка 2: Сигнал ИИ (Плашка Покупка / Продажа / Нейтрально)
+        ft.Row([
+            ft.Text("СИГНАЛ ИИ:", size=10, weight=ft.FontWeight.BOLD, color="#64748b"),
+            ai_live_action_badge
+        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+
+        # Строчка 3: Фильтр тренда и волатильности (ATR)
+        ft.Container(
+            content=ft.Row([
+                ai_live_trend_text
+            ], alignment=ft.MainAxisAlignment.CENTER, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            padding=ft.Padding.symmetric(vertical=3, horizontal=8),
+            border_radius=6,
+            bgcolor=ft.Colors.with_opacity(0.04, "#ffffff"),
+            border=ft.Border.all(1, ft.Colors.with_opacity(0.08, "#ffffff"))
         ),
+
+        # Строчка 4: Уверенность, Порог и Прогресс-бар
+        ft.Column([
+            ft.Row([
+                ai_live_confidence_text,
+                ai_live_threshold_text
+            ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            ai_live_progress_bar
+        ], spacing=4)
+    ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, expand=True)
+
+    # Карта управления ботом с двумя колонками: Левая - Кнопка и статус, Правая - Живой ИИ Анализ
+    bot_card = make_glass_card(
+        ft.Row([
+            # Левая колонка: Управление и кнопка
+            ft.Column(
+                [
+                    ft.Row([ft.Icon(ft.Icons.SMART_TOY_ROUNDED, color="#0284c7"), ft.Text("Управление ботом", size=15, weight=ft.FontWeight.BOLD, color="#f8fafc")]),
+                    bot_status_label,
+                    bot_status_desc,
+                    ft.Row([bot_toggle_btn], spacing=10)
+                ],
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                expand=True
+            ),
+            ft.VerticalDivider(width=1, color=ft.Colors.with_opacity(0.08, "#ffffff")),
+            # Правая колонка: ИИ в реальном времени (без вложенной карточки)
+            ft.Container(
+                content=ai_live_container,
+                padding=ft.Padding.only(left=4, right=4),
+                expand=True
+            )
+        ], spacing=14, vertical_alignment=ft.CrossAxisAlignment.STRETCH),
         {"xs": 12, "md": 6},
         height=190
     )
@@ -1059,8 +1175,7 @@ def build_dashboard_view(page: ft.Page, lang: str):
             bot_card,
             chart_card,
             indicators_card,
-            orders_card,
-            logs_card
+            orders_card
         ],
         spacing=16
     )
