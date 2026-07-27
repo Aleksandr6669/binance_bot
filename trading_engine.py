@@ -871,7 +871,7 @@ def _direct_fetch_binance_klines(symbol, timeframe, limit=100, market_type="SPOT
         data = None
         for url in urls:
             try:
-                res = requests.get(url, params=params, timeout=1.2, proxies=get_binance_proxies())
+                res = requests.get(url, params=params, timeout=2.5, proxies=get_binance_proxies())
                 res.raise_for_status()
                 data = res.json()
                 if data:
@@ -1431,7 +1431,9 @@ def evaluate_market_signal(persist_log=False, place_order=False):
             "reason": reason,
             "reason2": reason2,
             "order_type": order_type_desc,
-            "timeframe": timeframe
+            "timeframe": timeframe,
+            "trend_direction": trend_direction,
+            "vol_blocked": bool(vol_blocked)
         }, indent=2, ensure_ascii=False)
 
         if persist_log:

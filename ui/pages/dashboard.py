@@ -495,8 +495,11 @@ def build_dashboard_view(page: ft.Page, lang: str):
 
                     # Обновление средних аналитик (Тренд / ATR)
                     stage1_text = latest_log.get("stage1_output") or ""
-                    trend_str = "UP 🟢" if "Filter: UP" in stage1_text else ("DOWN 🔴" if "Filter: DOWN" in stage1_text else "—")
-                    vol_str = "OK 🟢" if "Volatility Filter: OK" in stage1_text else "BLOCKED ⚠️"
+                    trend_dir = s3.get("trend_direction", "UP" if ("Filter: UP" in stage1_text or "UP" in stage1_text) else ("DOWN" if ("Filter: DOWN" in stage1_text or "DOWN" in stage1_text) else "UP"))
+                    is_vol_blocked = s3.get("vol_blocked", ("BLOCKED" in stage1_text))
+
+                    trend_str = "UP 🟢" if trend_dir == "UP" else "DOWN 🔴"
+                    vol_str = "BLOCKED ⚠️" if is_vol_blocked else "OK 🟢"
                     ai_live_trend_text.value = f"📊 Тренд: {trend_str}    ⚡ ATR: {vol_str}"
 
                     vol_blocked = ("BLOCKED" in (latest_log.get("stage1_output") or ""))
