@@ -871,15 +871,27 @@ def _direct_fetch_binance_klines(symbol, timeframe, limit=100, market_type="SPOT
             params["endTime"] = end_time
             
         data = None
-        for url in urls:
-            try:
-                res = requests.get(url, params=params, timeout=2.5, proxies=get_binance_proxies())
-                res.raise_for_status()
+        # 1. Попытка прямого подключения к международному CDN Binance без прокси
+        try:
+            direct_url = "https://fapi.binance.com/fapi/v1/klines" if market_type == "FUTURES" else "https://data-api.binance.vision/api/v3/klines"
+            res = requests.get(direct_url, params=params, timeout=2.0)
+            if res.status_code == 200:
                 data = res.json()
-                if data:
-                    break
-            except Exception:
-                continue
+        except Exception:
+            pass
+
+        # 2. Если прямое подключение не ответило, делаем запрос через Прокси по всем зеркалам
+        if not data:
+            px = get_binance_proxies()
+            for url in urls:
+                try:
+                    res = requests.get(url, params=params, timeout=2.5, proxies=px)
+                    res.raise_for_status()
+                    data = res.json()
+                    if data:
+                        break
+                except Exception:
+                    continue
 
         if not data:
             break
