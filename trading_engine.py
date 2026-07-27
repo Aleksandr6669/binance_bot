@@ -820,7 +820,7 @@ def fetch_binance_klines(symbol, timeframe, limit=100, market_type="SPOT"):
     now = time.time()
     if cache_key in _klines_cache:
         cached_time, cached_data = _klines_cache[cache_key]
-        max_cache_age = 0.3 if limit <= 100 else 2.0
+        max_cache_age = 2.0
         if now - cached_time < max_cache_age:
             return cached_data
             
@@ -857,7 +857,7 @@ def fetch_binance_klines(symbol, timeframe, limit=100, market_type="SPOT"):
         data = None
         for url in urls:
             try:
-                res = requests.get(url, params=params, timeout=4.0, proxies=get_binance_proxies())
+                res = requests.get(url, params=params, timeout=1.5, proxies=get_binance_proxies())
                 res.raise_for_status()
                 data = res.json()
                 if data:

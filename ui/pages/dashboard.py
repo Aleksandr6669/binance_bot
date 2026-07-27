@@ -469,6 +469,12 @@ def build_dashboard_view(page: ft.Page, lang: str):
 
         # 5. Логи ИИ и динамический живой виджет аналитики ИИ (~3 раза/сек)
         try:
+            try:
+                curr_clock_str = datetime.now(user_tz).strftime("%H:%M:%S")
+                ai_live_clock_text.value = f"⏱ {curr_clock_str} LIVE"
+            except Exception:
+                pass
+
             latest_log = trading_engine.LATEST_LIVE_SIGNAL
             source_desc = "Live prediction"
             
@@ -486,13 +492,6 @@ def build_dashboard_view(page: ft.Page, lang: str):
                     price = s3.get("price", 0)
                     prob = float(s3.get("probability", 0.0))
                     order_type = s3.get("order_type", "")
-                    
-                    # Обновление живых часиков реального времени
-                    try:
-                        curr_clock_str = datetime.now(user_tz).strftime("%H:%M:%S")
-                        ai_live_clock_text.value = f"⏱ {curr_clock_str} LIVE"
-                    except Exception:
-                        pass
 
                     # Обновление средних аналитик (Тренд / ATR)
                     stage1_text = latest_log.get("stage1_output") or ""
