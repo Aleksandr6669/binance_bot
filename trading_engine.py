@@ -1373,6 +1373,9 @@ def evaluate_market_signal(persist_log=False, place_order=False):
                     pending_order = o
 
     try:
+        # Получаем живые свечи из кэша (обновляется фоновым поллером 3 раза/сек)
+        klines = fetch_binance_klines(pair, timeframe, limit=100, market_type=market_type)
+
         # Реальный стакан заявок Binance (OBI/CVD) — кэш 0.35 сек, без рандома
         real_obi, real_cvd = fetch_real_orderbook(pair, market_type)
 
