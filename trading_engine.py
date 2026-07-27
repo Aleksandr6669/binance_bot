@@ -1406,10 +1406,7 @@ def evaluate_market_signal(persist_log=False, place_order=False):
         features = features[:, :n_expected]
 
         raw_prob = float(scalping_ensemble.classifier_model.predict(features)[0])
-        base_calibrated = scalping_ensemble.calibrate_probability(raw_prob)
-        # Динамическая тиковая колебательность стакана в реальном времени (~3 раза/сек)
-        live_tick_noise = float(np.random.normal(0, 0.0035))
-        prob = float(np.clip(base_calibrated + live_tick_noise, 0.05, 0.96))
+        prob = scalping_ensemble.calibrate_probability(raw_prob)
         raw_thresh = dict(settings).get("min_probability_threshold")
         threshold = float(raw_thresh) if raw_thresh is not None else 0.65
         invert_signal = bool(dict(settings).get("invert_signal", 0))
@@ -1660,7 +1657,12 @@ def evaluate_market_signal(persist_log=False, place_order=False):
             "stage3_output": stage3_out,
             "created_at": created_at,
             "pair": pair,
-            "timeframe": timeframe
+            "timeframe": timeframe,
+            # Живые поля инференса (обновляются 3 раза/сек без ожидания БД)
+            "live_probability": float(prob),
+            "live_action": action,
+            "live_trend_direction": trend_direction,
+            "live_vol_blocked": bool(vol_blocked)
         }
         global LATEST_LIVE_SIGNAL
         LATEST_LIVE_SIGNAL = latest_log

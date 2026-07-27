@@ -488,15 +488,14 @@ def build_dashboard_view(page: ft.Page, lang: str):
                 try:
                     import json as _json
                     s3 = _json.loads(latest_log.get("stage3_output") or "{}")
-                    action = s3.get("action", "HOLD")
-                    price = s3.get("price", 0)
-                    prob = float(s3.get("probability", 0.0))
-                    order_type = s3.get("order_type", "")
+                    # Читаем живые поля инференса напрямую (обновляются 3 раза/сек)
+                    prob = float(latest_log.get("live_probability", float(s3.get("probability", 0.0))))
+                    action = latest_log.get("live_action", s3.get("action", "HOLD"))
 
                     # Обновление средних аналитик (Тренд / ATR)
                     stage1_text = latest_log.get("stage1_output") or ""
-                    trend_dir = s3.get("trend_direction", "UP" if ("Filter: UP" in stage1_text or "UP" in stage1_text) else ("DOWN" if ("Filter: DOWN" in stage1_text or "DOWN" in stage1_text) else "UP"))
-                    is_vol_blocked = s3.get("vol_blocked", ("BLOCKED" in stage1_text))
+                    trend_dir = latest_log.get("live_trend_direction", s3.get("trend_direction", "UP"))
+                    is_vol_blocked = latest_log.get("live_vol_blocked", s3.get("vol_blocked", "BLOCKED" in stage1_text))
 
                     trend_str = "UP 🟢" if trend_dir == "UP" else "DOWN 🔴"
                     vol_str = "BLOCKED ⚠️" if is_vol_blocked else "OK 🟢"
@@ -530,11 +529,7 @@ def build_dashboard_view(page: ft.Page, lang: str):
                     )
 
                     # Обновление динамического живого виджета ИИ
-                    # Добавляем микровариацию к отображению для живой динамики (±0.5%)
-                    import random as _rnd
-                    micro_disp = _rnd.uniform(-0.005, 0.005)
-                    prob_disp = float(max(0.05, min(0.96, prob + micro_disp)))
-                    prob_pct = prob_disp * 100.0
+                    prob_pct = prob * 100.0
                     if action == "BUY":
                         act_label = "🟢 ПОКУПКА"
                         act_color = "#10b981"
@@ -552,7 +547,7 @@ def build_dashboard_view(page: ft.Page, lang: str):
 
                     ai_live_confidence_text.value = f"Уверенность: {prob_pct:.2f}%"
                     ai_live_threshold_text.value = f"Порог: {thresh_pct:.1f}%"
-                    ai_live_progress_bar.value = min(1.0, max(0.0, prob_disp))
+                    ai_live_progress_bar.value = min(1.0, max(0.0, prob))
                     ai_live_progress_bar.color = act_color
 
                 except Exception:
