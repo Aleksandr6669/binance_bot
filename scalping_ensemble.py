@@ -1716,17 +1716,13 @@ def bootstrap_virtual_training(pair, timeframe):
     """
 def calibrate_probability(raw_p, p_95=0.40):
     """
-    Калибрует сырую вероятность LightGBM (0.15..0.40) к рабочей шкале уверенности ИИ (0.10..0.95).
+    Динамическая калибровка сырой вероятности LightGBM к естественной рабочей шкале уверенности ИИ (0.05..0.96).
+    Обеспечивает чувствительность к рынку: при слабом сигнале уверенность падает до 15-45%,
+    а при сильном подтвержденном тренде возрастает до 75-92%.
     """
-    if p_95 <= 0.05:
-        p_95 = 0.40
-    ratio = raw_p / p_95
-    if ratio >= 1.0:
-        return float(np.clip(0.85 + min(0.12, (ratio - 1.0) * 0.25), 0.10, 0.97))
-    elif ratio >= 0.75:
-        return float(np.clip(0.65 + (ratio - 0.75) / 0.25 * 0.20, 0.10, 0.85))
-    else:
-        return float(np.clip(ratio / 0.75 * 0.65, 0.05, 0.65))
+    raw_p = float(np.clip(raw_p, 0.0, 1.0))
+    calibrated = 1.0 / (1.0 + np.exp(-12.0 * (raw_p - 0.36)))
+    return float(np.clip(calibrated, 0.05, 0.96))
 
 def get_adaptive_ema_span(tf="1m"):
     """Возвращает адаптивный период EMA в зависимости от таймфрейма."""
