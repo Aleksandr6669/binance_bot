@@ -78,6 +78,50 @@ _price_cache = {}
 _positions_cache = {}
 _open_orders_cache = {}
 _balance_cache = {}
+_orderbook_cache = {}  # Кэш стакана заявок (OBI/CVD) — обновляется 3 раза/сек
+
+
+def fetch_real_orderbook(symbol, market_type="SPOT"):
+    """
+    Запрашивает реальный стакан Binance и вычисляет OBI (Order Book Imbalance) и
+    приблизительный CVD (Cumulative Volume Delta) из топ-5 уровней.
+    Кэшируется на 0.35 сек чтобы не спамить API при 3 вызовах/сек.
+    """
+    symbol = symbol.upper()
+    market_type = market_type.upper()
+    cache_key = (symbol, market_type)
+    now = time.time()
+
+    if cache_key in _orderbook_cache:
+        cached_time, cached_obi, cached_cvd = _orderbook_cache[cache_key]
+        if now - cached_time < 0.35:
+            return cached_obi, cached_cvd
+
+    try:
+        if market_type == "FUTURES":
+            url = "https://fapi.binance.com/fapi/v1/depth"
+        else:
+            url = "https://data-api.binance.vision/api/v3/depth"
+        res = requests.get(url, params={"symbol": symbol, "limit": 5}, timeout=1.0)
+        if res.status_code == 200:
+            data = res.json()
+            bids = data.get("bids", [])
+            asks = data.get("asks", [])
+            bid_vol = sum(float(b[1]) for b in bids)
+            ask_vol = sum(float(a[1]) for a in asks)
+            total_vol = bid_vol + ask_vol
+            obi = float(np.clip((bid_vol - ask_vol) / total_vol, -1.0, 1.0)) if total_vol > 0 else 0.0
+            cvd = float(bid_vol - ask_vol)
+            _orderbook_cache[cache_key] = (now, obi, cvd)
+            return obi, cvd
+    except Exception:
+        pass
+
+    # Фоллбек: если стакан недоступен — возвращаем из кэша или нейтральные значения
+    if cache_key in _orderbook_cache:
+        _, obi, cvd = _orderbook_cache[cache_key]
+        return obi, cvd
+    return 0.0, 0.0
 
 # =====================================================================
 # 1. ХЕЛПЕРЫ ДЛЯ РАБОТЫ С BINANCE API (ПОДПИСЬ И ФОРМАТИРОВАНИЕ)
@@ -1329,7 +1373,9 @@ def evaluate_market_signal(persist_log=False, place_order=False):
                     pending_order = o
 
     try:
-        klines = fetch_binance_klines(pair, timeframe, limit=100, market_type=market_type)
+        # Реальный стакан заявок Binance (OBI/CVD) — кэш 0.35 сек, без рандома
+        real_obi, real_cvd = fetch_real_orderbook(pair, market_type)
+
         df = pd.DataFrame([{
             "time": k[0],
             "open": float(k[1]),
@@ -1337,8 +1383,8 @@ def evaluate_market_signal(persist_log=False, place_order=False):
             "low": float(k[3]),
             "close": float(k[4]),
             "volume": float(k[5]),
-            "obi": np.clip(np.random.normal(0, 0.1), -1.0, 1.0),
-            "cvd": np.random.normal(0, 50.0)
+            "obi": real_obi,
+            "cvd": real_cvd
         } for k in klines])
 
         df = scalping_ensemble.calculate_indicators(df, timeframe=timeframe)
@@ -1383,17 +1429,13 @@ def evaluate_market_signal(persist_log=False, place_order=False):
         current_time_ms = float(current_row["time"])
         current_hour = pd.to_datetime(current_time_ms, unit='ms').hour / 24.0
 
-        # Микротиковые динамические колебания стакана в реальном времени (~3 раза/сек)
-        micro_tick_delta = float(np.random.normal(0, 0.0015))
-        micro_obi = float(np.clip(current_obi + np.random.normal(0, 0.04), -1.0, 1.0))
-        micro_cvd = float(current_cvd + np.random.normal(0, 2.5))
-
+        # Признаки для инференса — только реальные рыночные данные, без рандома
         features = np.array([[
-            float(np.clip(current_rsi_norm + micro_tick_delta, 0.0, 1.0)),
+            float(np.clip(current_rsi_norm, 0.0, 1.0)),
             current_atr_pct,
-            micro_obi,
-            micro_cvd,
-            pred_change_1m + micro_tick_delta * 0.5,
+            current_obi,      # Реальный OBI из стакана Binance
+            current_cvd,      # Реальный CVD из стакана Binance
+            pred_change_1m,
             pred_change_2m,
             current_hour,
             current_row.get("vwap_dist", 0.0),
