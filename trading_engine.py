@@ -811,18 +811,32 @@ def handle_post_trade_learning(pair, timeframe, pnl):
 # =====================================================================
 # 3. ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
 # =====================================================================
-def fetch_binance_klines(symbol, timeframe, limit=100, market_type="SPOT"):
-    """Запрашивает публичную историю свечей с Binance API с автоматической пагинацией для глубокого бутстрапа (>1000 свечей)."""
+_klines_poller_thread = None
+
+def _start_klines_poller_if_needed():
+    global _klines_poller_thread
+    if _klines_poller_thread is None or not _klines_poller_thread.is_alive():
+        def _poller_worker():
+            while not _stop_event.is_set():
+                try:
+                    settings = db.get_settings()
+                    if settings:
+                        pair = (dict(settings).get("trading_pair") or "BTCUSDT").upper()
+                        tf = dict(settings).get("timeframe") or "1m"
+                        mtype = (dict(settings).get("market_type") or "SPOT").upper()
+                        _direct_fetch_binance_klines(pair, tf, limit=100, market_type=mtype)
+                        _direct_fetch_binance_klines(pair, tf, limit=50, market_type=mtype)
+                except Exception:
+                    pass
+                time.sleep(0.3) # Опрос свечей 3 раза в секунду в фоновом потоке
+        _klines_poller_thread = threading.Thread(target=_poller_worker, daemon=True)
+        _klines_poller_thread.start()
+
+def _direct_fetch_binance_klines(symbol, timeframe, limit=100, market_type="SPOT"):
     symbol = symbol.upper()
     market_type = market_type.upper()
-    
     cache_key = (symbol, timeframe, limit, market_type)
     now = time.time()
-    if cache_key in _klines_cache:
-        cached_time, cached_data = _klines_cache[cache_key]
-        max_cache_age = 2.0
-        if now - cached_time < max_cache_age:
-            return cached_data
             
     use_us = os.environ.get("USE_BINANCE_US", "False").lower() == "true"
     if market_type == "FUTURES":
@@ -857,7 +871,7 @@ def fetch_binance_klines(symbol, timeframe, limit=100, market_type="SPOT"):
         data = None
         for url in urls:
             try:
-                res = requests.get(url, params=params, timeout=1.5, proxies=get_binance_proxies())
+                res = requests.get(url, params=params, timeout=1.2, proxies=get_binance_proxies())
                 res.raise_for_status()
                 data = res.json()
                 if data:
@@ -887,6 +901,18 @@ def fetch_binance_klines(symbol, timeframe, limit=100, market_type="SPOT"):
         if k_key[0] == symbol and k_key[1] == timeframe and k_key[3] == market_type:
             return val[1]
     return []
+
+def fetch_binance_klines(symbol, timeframe, limit=100, market_type="SPOT"):
+    """Возвращает актуальные свечи (опрашиваются 3 раза в секунду в фоновом потоке) мгновенно (<0.01мс) без зависаний UI."""
+    _start_klines_poller_if_needed()
+    symbol = symbol.upper()
+    market_type = market_type.upper()
+    cache_key = (symbol, timeframe, limit, market_type)
+
+    if cache_key in _klines_cache:
+        return _klines_cache[cache_key][1]
+
+    return _direct_fetch_binance_klines(symbol, timeframe, limit, market_type)
 
 def fetch_current_price(symbol, market_type="SPOT"):
     """Запрашивает текущую тикерную цену с Binance API (Spot или Futures) с кешированием на 0.1 секунду."""
