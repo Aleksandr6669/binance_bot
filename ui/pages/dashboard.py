@@ -491,6 +491,8 @@ def build_dashboard_view(page: ft.Page, lang: str):
                     # Читаем живые поля инференса напрямую (обновляются 3 раза/сек)
                     prob = float(latest_log.get("live_probability", float(s3.get("probability", 0.0))))
                     action = latest_log.get("live_action", s3.get("action", "HOLD"))
+                    price = float(s3.get("price", 0.0))
+                    order_type = s3.get("order_type", "")
 
                     # Обновление средних аналитик (Тренд / ATR)
                     stage1_text = latest_log.get("stage1_output") or ""
@@ -516,19 +518,8 @@ def build_dashboard_view(page: ft.Page, lang: str):
                         reason2 = s3.get("reason2", "")
 
                     action_icon = "🟢" if action == "BUY" else ("🔴" if action == "SELL" else "⏸")
-                    t_act = t("action_lbl", lang)
-                    t_ord = t("order_lbl", lang)
-                    t_prc = t("price_lbl", lang)
-                    t_prob = t("probability_lbl", lang)
 
-                    ml_logs_stage3.value = (
-                        f"{action_icon}  {t_act}{action}  |  {t_ord}{order_type}\n"
-                        f"💰  {t_prc}${price:,.4f}\n"
-                        f"📊  {t_prob}{prob*100:.2f}%\n"
-                        f"📝  {reason} {reason2}"
-                    )
-
-                    # Обновление динамического живого виджета ИИ
+                    # Обновление живого виджета ИИ (приоритет — сделать до ml_logs_stage3)
                     prob_pct = prob * 100.0
                     if action == "BUY":
                         act_label = "🟢 ПОКУПКА"
@@ -550,8 +541,22 @@ def build_dashboard_view(page: ft.Page, lang: str):
                     ai_live_progress_bar.value = min(1.0, max(0.0, prob))
                     ai_live_progress_bar.color = act_color
 
+                    # Логи (второстепенные — обновляем отдельно)
+                    try:
+                        t_act = t("action_lbl", lang)
+                        t_ord = t("order_lbl", lang)
+                        t_prc = t("price_lbl", lang)
+                        t_prob = t("probability_lbl", lang)
+                        ml_logs_stage3.value = (
+                            f"{action_icon}  {t_act}{action}  |  {t_ord}{order_type}\n"
+                            f"💰  {t_prc}${price:,.4f}\n"
+                            f"📊  {t_prob}{prob*100:.2f}%\n"
+                            f"📝  {reason} {reason2}"
+                        )
+                    except Exception:
+                        pass
                 except Exception:
-                    ml_logs_stage3.value = latest_log.get("stage3_output") or "—"
+                    pass
                 
                 ts = to_client_local_str(latest_log.get("created_at", "—"))
                 ml_log_time.value = f"🕐  Last run: {ts} ({source_desc})"
