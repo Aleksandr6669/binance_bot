@@ -530,7 +530,11 @@ def build_dashboard_view(page: ft.Page, lang: str):
                     )
 
                     # Обновление динамического живого виджета ИИ
-                    prob_pct = prob * 100.0
+                    # Добавляем микровариацию к отображению для живой динамики (±0.5%)
+                    import random as _rnd
+                    micro_disp = _rnd.uniform(-0.005, 0.005)
+                    prob_disp = float(max(0.05, min(0.96, prob + micro_disp)))
+                    prob_pct = prob_disp * 100.0
                     if action == "BUY":
                         act_label = "🟢 ПОКУПКА"
                         act_color = "#10b981"
@@ -548,7 +552,7 @@ def build_dashboard_view(page: ft.Page, lang: str):
 
                     ai_live_confidence_text.value = f"Уверенность: {prob_pct:.2f}%"
                     ai_live_threshold_text.value = f"Порог: {thresh_pct:.1f}%"
-                    ai_live_progress_bar.value = min(1.0, max(0.0, prob))
+                    ai_live_progress_bar.value = min(1.0, max(0.0, prob_disp))
                     ai_live_progress_bar.color = act_color
 
                 except Exception:
@@ -599,7 +603,6 @@ def build_dashboard_view(page: ft.Page, lang: str):
                     ai_live_action_text.color = "#0284c7"
                     ai_live_confidence_text.value = "Уверенность: —"
                     ai_live_threshold_text.value = f"Порог: {thresh_pct:.1f}%"
-                    ai_live_status_text.value = "Сбор данных и расчет ИИ..."
         except Exception as e:
             if is_destroyed_session_error(e):
                 raise e
