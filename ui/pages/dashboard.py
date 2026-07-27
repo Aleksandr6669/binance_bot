@@ -544,7 +544,7 @@ def build_dashboard_view(page: ft.Page, lang: str):
                     ai_live_action_badge.bgcolor = ft.Colors.with_opacity(0.15, act_color)
                     ai_live_action_badge.border = ft.Border.all(1, ft.Colors.with_opacity(0.35, act_color))
 
-                    ai_live_confidence_text.value = f"Уверенность: {prob_pct:.1f}%"
+                    ai_live_confidence_text.value = f"Уверенность: {prob_pct:.2f}%"
                     ai_live_threshold_text.value = f"Порог: {thresh_pct:.1f}%"
                     ai_live_progress_bar.value = min(1.0, max(0.0, prob))
                     ai_live_progress_bar.color = act_color

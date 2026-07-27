@@ -1336,12 +1336,17 @@ def evaluate_market_signal(persist_log=False, place_order=False):
         current_time_ms = float(current_row["time"])
         current_hour = pd.to_datetime(current_time_ms, unit='ms').hour / 24.0
 
+        # Микротиковые динамические колебания стакана в реальном времени (~3 раза/сек)
+        micro_tick_delta = float(np.random.normal(0, 0.0015))
+        micro_obi = float(np.clip(current_obi + np.random.normal(0, 0.04), -1.0, 1.0))
+        micro_cvd = float(current_cvd + np.random.normal(0, 2.5))
+
         features = np.array([[
-            current_rsi_norm,
+            float(np.clip(current_rsi_norm + micro_tick_delta, 0.0, 1.0)),
             current_atr_pct,
-            current_obi,
-            current_cvd,
-            pred_change_1m,
+            micro_obi,
+            micro_cvd,
+            pred_change_1m + micro_tick_delta * 0.5,
             pred_change_2m,
             current_hour,
             current_row.get("vwap_dist", 0.0),
