@@ -527,7 +527,6 @@ def save_models_to_disk(pair, timeframe):
             "virtual_stats": v_stat,
             "val_stats": val_stat,
             "real_stats": real_stats,
-            "db_orders": orders,
             "db_analysis_logs": analysis_logs,
             "db_market_candles": market_candles
         }
@@ -598,21 +597,11 @@ def load_models_from_disk(pair, timeframe):
         current_model_pair = pair.upper()
         current_model_timeframe = timeframe
         
-        # Импортируем историю в базу данных SQLite
+        # Импортируем историю свечей и логов из pkl если необходимо (без перетирания точных ордеров БД)
         try:
             import sqlite3
             db_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading_bot.db")
             conn = sqlite3.connect(db_file)
-            
-            # Импортируем ордера
-            if "db_orders" in data and data["db_orders"]:
-                for o in data["db_orders"]:
-                    columns = ", ".join(o.keys())
-                    placeholders = ", ".join("?" for _ in o)
-                    conn.execute(
-                        f"INSERT OR IGNORE INTO orders ({columns}) VALUES ({placeholders})", 
-                        tuple(o.values())
-                    )
             
             # Импортируем логи анализа ИИ
             if "db_analysis_logs" in data and data["db_analysis_logs"]:
@@ -935,6 +924,20 @@ def calculate_indicators(df, rsi_period=14, atr_period=14, timeframe="1m", **kwa
 
     # 7. Расчет EMA тренда (ema_trend = EMA 1000)
     df['ema_trend'] = df['close'].ewm(span=1000, adjust=False).mean()
+
+    # 8. Фичи крупных плотностей стакана и ликвидаций по умолчанию
+    if 'bid_wall_dist' not in df.columns:
+        df['bid_wall_dist'] = 0.005
+    if 'ask_wall_dist' not in df.columns:
+        df['ask_wall_dist'] = 0.005
+    if 'wall_ratio' not in df.columns:
+        df['wall_ratio'] = 0.0
+    if 'short_liq_dist' not in df.columns:
+        df['short_liq_dist'] = 0.02
+    if 'long_liq_dist' not in df.columns:
+        df['long_liq_dist'] = 0.02
+    if 'liq_imbalance' not in df.columns:
+        df['liq_imbalance'] = 0.0
         
     return df
 
@@ -1180,7 +1183,9 @@ def train_models(df):
     # Список колонок-фичей для классификатора и трейлинга
     feature_cols = [
         'rsi_norm', 'atr_pct', 'obi', 'cvd', 'dlinear_pred_1m', 'dlinear_pred_2m', 'hour_feature',
-        'vwap_dist', 'macd_hist_norm', 'bb_dist', 'vol_surge', 'wick_ratio'
+        'vwap_dist', 'macd_hist_norm', 'bb_dist', 'vol_surge', 'wick_ratio',
+        'bid_wall_dist', 'ask_wall_dist', 'wall_ratio',
+        'short_liq_dist', 'long_liq_dist', 'liq_imbalance'
     ]
     
     # Убираем пропуски перед обучением
@@ -1528,7 +1533,9 @@ def _retrain_on_market_history_inner(pair, timeframe):
     # 5. Переобучаем/дообучаем классификатор и ИИ-трейлинг
     feature_cols = [
         'rsi_norm', 'atr_pct', 'obi', 'cvd', 'dlinear_pred_1m', 'dlinear_pred_2m', 'hour_feature',
-        'vwap_dist', 'macd_hist_norm', 'bb_dist', 'vol_surge', 'wick_ratio'
+        'vwap_dist', 'macd_hist_norm', 'bb_dist', 'vol_surge', 'wick_ratio',
+        'bid_wall_dist', 'ask_wall_dist', 'wall_ratio',
+        'short_liq_dist', 'long_liq_dist', 'liq_imbalance'
     ]
     
     # Расчет таргета для ИИ-трейлинга
@@ -1917,7 +1924,9 @@ def _bootstrap_virtual_training_inner(pair, timeframe):
     
     feature_cols = [
         'rsi_norm', 'atr_pct', 'obi', 'cvd', 'dlinear_pred_1m', 'dlinear_pred_2m', 'hour_feature',
-        'vwap_dist', 'macd_hist_norm', 'bb_dist', 'vol_surge', 'wick_ratio'
+        'vwap_dist', 'macd_hist_norm', 'bb_dist', 'vol_surge', 'wick_ratio',
+        'bid_wall_dist', 'ask_wall_dist', 'wall_ratio',
+        'short_liq_dist', 'long_liq_dist', 'liq_imbalance'
     ]
     
     training_status["msg"] = f"Обучение {pair.upper()} ({timeframe}) [4/5]: ⚡ Симуляция виртуальных ордеров TP/SL и загрузка логов из БД..."
@@ -1976,7 +1985,7 @@ def _bootstrap_virtual_training_inner(pair, timeframe):
             if pnl is None:
                 exit_price = df.iloc[min(i + 20, n - 1)]['close']
                 pnl = (exit_price - entry_price) / entry_price * 100 if signal == "BUY" else (entry_price - exit_price) / entry_price * 100
-                is_win = 1 if pnl > 0 else 0
+                is_win = 1 if pnl > 0.12 else 0
                 
             virtual_orders.append({
                 "idx": i,

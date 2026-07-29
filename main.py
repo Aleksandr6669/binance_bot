@@ -8,9 +8,21 @@ load_dotenv()
 import db
 import trading_engine
 import flet_app
+import video_streamer
 
 # Глобальная настройка прокси для всех сетевых запросов при старте
 trading_engine.get_binance_proxies()
+
+def get_local_ip():
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
 
 def start_application():
     print("=== Инициализация базы данных... ===")
@@ -23,10 +35,26 @@ def start_application():
     # Считываем конфигурацию портов и хостов из окружения
     host = os.environ.get("HOST", "0.0.0.0")
     port = int(os.environ.get("PORT", 8550))
-    web_mode = os.environ.get("FLET_WEB_MODE", "0") == "1"
+    # Включаем сетевой веб-режим для доступа с любых устройств в сети (по умолчанию True)
+    web_mode_env = os.environ.get("FLET_WEB_MODE", "1")
+    web_mode = web_mode_env != "0"
+    local_ip = get_local_ip()
+    stream_url = f"http://{local_ip}:{port}"
+    video_stream_url = f"http://{local_ip}:8554/stream.mjpeg"
+    os.environ["STREAM_URL"] = stream_url
+    os.environ["VIDEO_STREAM_URL"] = video_stream_url
+
+    # Запускаем прямой MJPEG Видеостример для медиаплееров
+    try:
+        video_streamer.start_video_streamer(host="0.0.0.0", port=8554)
+    except Exception as ex:
+        print(f"Ошибка запуска Видеостримера: {ex}")
     
     print("=" * 60)
     print("🚀 NEXUS AI TRADING TERMINAL ЗАПУЩЕН!")
+    print("=" * 60)
+    print(f"🌐 СЕТЕВОЙ ВЕБ-ИНТЕРФЕЙС (Браузеры): {stream_url}")
+    print(f"🎥 ПРЯМОЙ ВИДЕОПОТОК (VLC / Smart TV / AirPlay / Google Play): {video_stream_url}")
     print("=" * 60)
     if os.environ.get("APP_PASSWORD"):
         print("🔒 Вход защищен паролем из .env (APP_PASSWORD)")

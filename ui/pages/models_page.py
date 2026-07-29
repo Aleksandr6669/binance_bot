@@ -260,7 +260,7 @@ def build_models_view(page: ft.Page, lang: str):
                             padding=ft.Padding.symmetric(vertical=5, horizontal=10)
                         ),
                         on_click=make_delete_handler(pair, tf),
-                        visible=not is_active  # Скрыть кнопку удаления для активной модели
+                        visible=not (is_active and bool(dict(settings or {}).get("bot_enabled", 0) == 1))
                     )
                 ], alignment=ft.MainAxisAlignment.END, spacing=6)
 

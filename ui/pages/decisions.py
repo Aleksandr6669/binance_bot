@@ -45,7 +45,14 @@ def extract_log_timeframe(log):
 
     return "1m"
 
+SAVED_DECISION_FILTERS = {
+    "pair": "",
+    "tf": "",
+    "date": None
+}
+
 def build_decisions_view(page: ft.Page, lang: str):
+    global SAVED_DECISION_FILTERS
     tz_offset = getattr(page, "tz_offset", None) or db.get_host_tz_offset_min()
     page.tz_offset = tz_offset
     user_tz = datetime.timezone(datetime.timedelta(minutes=tz_offset))
@@ -97,11 +104,11 @@ def build_decisions_view(page: ft.Page, lang: str):
         expand=True
     )
 
-    # Filter state — pair search, timeframe, and single date
+    # Filter state — восстанавливаем сохраненные значения
     filter_state = {
-        "pair": "",
-        "tf": "ALL",
-        "date": today_str,
+        "pair": SAVED_DECISION_FILTERS["pair"],
+        "tf": SAVED_DECISION_FILTERS["tf"],
+        "date": SAVED_DECISION_FILTERS["date"] or today_str,
     }
 
     # State tracking
@@ -414,7 +421,7 @@ def build_decisions_view(page: ft.Page, lang: str):
         render_details(only_header=False)
 
     # ---------- Pair search field ----------
-    pair_field = make_textfield(hint_text=t_search_hint, value="", on_change=run_apply)
+    pair_field = make_textfield(hint_text=t_search_hint, value=SAVED_DECISION_FILTERS["pair"], on_change=run_apply)
     pair_field.height = 48
     pair_field.margin = ft.Margin.all(0)
     pair_field.content_padding = ft.Padding(10, 14, 10, 14)
@@ -422,7 +429,10 @@ def build_decisions_view(page: ft.Page, lang: str):
     pair_field.expand = True
 
     def on_pair_change(e):
-        filter_state["pair"] = pair_field.value or ""
+        global SAVED_DECISION_FILTERS
+        val = pair_field.value or ""
+        filter_state["pair"] = val
+        SAVED_DECISION_FILTERS["pair"] = val
         run_apply()
 
     pair_field.on_change = on_pair_change
@@ -441,7 +451,7 @@ def build_decisions_view(page: ft.Page, lang: str):
         label=None,
         options=[ft.dropdown.Option(k, v) for k, v in timeframe_options],
         width=125,
-        value="",
+        value=SAVED_DECISION_FILTERS["tf"],
         on_change=lambda e: on_tf_change(e)
     )
     tf_dropdown.height = 48
@@ -449,13 +459,17 @@ def build_decisions_view(page: ft.Page, lang: str):
     tf_dropdown.text_style = ft.TextStyle(size=10)
 
     def on_tf_change(e):
-        filter_state["tf"] = tf_dropdown.value or ""
+        global SAVED_DECISION_FILTERS
+        val = tf_dropdown.value or ""
+        filter_state["tf"] = val
+        SAVED_DECISION_FILTERS["tf"] = val
         run_apply()
 
     # ---------- Single date picker ----------
     date_text = ft.Text(filter_state["date"], size=10, color="#f8fafc")
 
     def on_date_picked(e):
+        global SAVED_DECISION_FILTERS
         if e.control.value:
             dt = e.control.value
             if dt.tzinfo is None:
@@ -463,6 +477,7 @@ def build_decisions_view(page: ft.Page, lang: str):
             local_dt = dt.astimezone(user_tz)
             formatted = local_dt.strftime("%Y-%m-%d")
             filter_state["date"] = formatted
+            SAVED_DECISION_FILTERS["date"] = formatted
             date_text.value = formatted
             date_text.color = "#f8fafc"
             date_container.update()

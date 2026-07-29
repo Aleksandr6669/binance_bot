@@ -85,6 +85,9 @@ def init_db():
         "ALTER TABLE orders ADD COLUMN market_type TEXT DEFAULT 'SPOT'",
         "ALTER TABLE orders ADD COLUMN trading_mode TEXT DEFAULT 'DEMO'",
         "ALTER TABLE orders ADD COLUMN timeframe TEXT",
+        "ALTER TABLE orders ADD COLUMN binance_order_id TEXT",
+        "ALTER TABLE orders ADD COLUMN binance_close_order_id TEXT",
+        "ALTER TABLE orders ADD COLUMN chart_snapshot TEXT",
     ]
     for sql in migrations:
         try:
@@ -175,6 +178,7 @@ def init_db():
     conn.close()
 
 def update_api_keys(gemini_api_key, binance_api_key, binance_api_secret, use_proxy, proxy_url):
+    invalidate_settings_cache()
     conn = get_db_connection()
     conn.execute(
         '''UPDATE settings 
@@ -187,6 +191,7 @@ def update_api_keys(gemini_api_key, binance_api_key, binance_api_secret, use_pro
     upload_db_to_hf_async()
 
 def update_demo_balance(balance):
+    invalidate_settings_cache()
     conn = get_db_connection()
     conn.execute("UPDATE settings SET demo_balance = ? WHERE id = 1", (balance,))
     conn.commit()
@@ -202,13 +207,37 @@ def save_ui_settings(ui_language, ui_auto_center):
     conn.commit()
     conn.close()
 
+_settings_cache = None
+_settings_cache_time = 0
+
+def invalidate_settings_cache():
+    global _settings_cache, _settings_cache_time
+    _settings_cache = None
+    _settings_cache_time = 0
+
 def get_settings():
-    conn = get_db_connection()
-    settings = conn.execute("SELECT * FROM settings WHERE id = 1").fetchone()
-    conn.close()
-    return dict(settings) if settings else None
+    global _settings_cache, _settings_cache_time
+    import time
+    now = time.time()
+    if _settings_cache is not None and (now - _settings_cache_time) < 1.0:
+        return _settings_cache
+
+    try:
+        conn = get_db_connection()
+        settings = conn.execute("SELECT * FROM settings WHERE id = 1").fetchone()
+        conn.close()
+        res = dict(settings) if settings else None
+        if res:
+            _settings_cache = res
+            _settings_cache_time = now
+        return res
+    except Exception as e:
+        if _settings_cache is not None:
+            return _settings_cache
+        return None
 
 def save_settings(trading_pair, timeframe, order_size_usdt, bot_enabled, trading_mode, market_type="SPOT", futures_leverage=10, min_probability_threshold=0.65, invert_signal=0, bot_started_at=None, use_limit_orders=1, use_trailing_stop=1, use_ai_limit_price=0, trailing_activation_pct=0.5, trailing_step_pct=0.2, use_ai_exit=0, use_ai_trailing=0, daily_loss_limit=0.0, daily_profit_target=0.0, limit_offset_pct=1.0, ai_exit_mode="STAGNATION_AND_REVERSAL", stagnation_candles=3, stagnation_pnl_threshold=0.30):
+    invalidate_settings_cache()
     conn = get_db_connection()
     conn.execute(
         '''UPDATE settings SET trading_pair = ?, timeframe = ?, order_size_usdt = ?, bot_enabled = ?, trading_mode = ?, market_type = ?, futures_leverage = ?, min_probability_threshold = ?, invert_signal = ?, bot_started_at = ?, use_limit_orders = ?, use_trailing_stop = ?, use_ai_limit_price = ?, trailing_activation_pct = ?, trailing_step_pct = ?, use_ai_exit = ?, use_ai_trailing = ?, daily_loss_limit = ?, daily_profit_target = ?, limit_offset_pct = ?, ai_exit_mode = ?, stagnation_candles = ?, stagnation_pnl_threshold = ? WHERE id = 1''',
@@ -224,16 +253,35 @@ def get_all_active_bot_settings():
         return [(1, s)]
     return []
 
-def create_order(pair, side, entry_price, stop_loss, take_profit, amount, size_usdt, trading_mode="DEMO", market_type="SPOT", leverage=1, status="ACTIVE", trailing_distance=None, timeframe=None):
+def create_order(pair, side, entry_price, stop_loss, take_profit, amount, size_usdt, trading_mode="DEMO", market_type="SPOT", leverage=1, status="ACTIVE", trailing_distance=None, timeframe=None, binance_order_id=None):
     conn = get_db_connection()
     conn.execute(
-        '''INSERT INTO orders (pair, side, entry_price, stop_loss, take_profit, amount, size_usdt, status, trading_mode, market_type, leverage, trailing_distance, timeframe) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-        (pair.upper(), side.upper(), float(entry_price), float(stop_loss) if stop_loss else None, float(take_profit) if take_profit else None, float(amount), float(size_usdt), status, trading_mode, market_type, leverage, float(trailing_distance) if trailing_distance else None, timeframe)
+        '''INSERT INTO orders (pair, side, entry_price, stop_loss, take_profit, amount, size_usdt, status, trading_mode, market_type, leverage, trailing_distance, timeframe, binance_order_id) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+        (pair.upper(), side.upper(), float(entry_price), float(stop_loss) if stop_loss else None, float(take_profit) if take_profit else None, float(amount), float(size_usdt), status, trading_mode, market_type, leverage, float(trailing_distance) if trailing_distance else None, timeframe, str(binance_order_id) if binance_order_id else None)
     )
     conn.commit()
     conn.close()
     upload_db_to_hf_async()
+
+def update_order_sync_data(order_id, entry_price, amount, leverage=None):
+    """Обновляет точные параметры входа позиции с биржи Binance."""
+    try:
+        conn = get_db_connection()
+        if leverage:
+            conn.execute(
+                "UPDATE orders SET entry_price = ?, amount = ?, size_usdt = ?, leverage = ? WHERE id = ?",
+                (float(entry_price), float(amount), float(entry_price) * float(amount), int(leverage), int(order_id))
+            )
+        else:
+            conn.execute(
+                "UPDATE orders SET entry_price = ?, amount = ?, size_usdt = ? WHERE id = ?",
+                (float(entry_price), float(amount), float(entry_price) * float(amount), int(order_id))
+            )
+        conn.commit()
+        conn.close()
+    except Exception as ex:
+        print(f"Error updating sync order data in DB: {ex}")
 
 def get_active_orders():
     conn = get_db_connection()
@@ -314,7 +362,7 @@ def save_market_candle(pair, timeframe, open_time, open_p, high, low, close, vol
     except Exception as e:
         pass  # Non-critical, don't break the main cycle
 
-def close_order(order_id, status=None, close_price=None, pnl=None):
+def close_order(order_id, status=None, close_price=None, pnl=None, chart_snapshot=None):
     conn = get_db_connection()
     order = conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
     if not order:
@@ -326,11 +374,16 @@ def close_order(order_id, status=None, close_price=None, pnl=None):
     _pnl = pnl if pnl is not None else 0.0
     _close_price = close_price if close_price is not None else None
     
-    import datetime as _dt
-    conn.execute(
-        "UPDATE orders SET status = ?, pnl = ?, close_price = ?, closed_at = CURRENT_TIMESTAMP WHERE id = ?",
-        (_status, _pnl, _close_price, order_id)
-    )
+    if chart_snapshot is not None:
+        conn.execute(
+            "UPDATE orders SET status = ?, pnl = ?, close_price = ?, chart_snapshot = ?, closed_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (_status, _pnl, _close_price, str(chart_snapshot), order_id)
+        )
+    else:
+        conn.execute(
+            "UPDATE orders SET status = ?, pnl = ?, close_price = ?, closed_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (_status, _pnl, _close_price, order_id)
+        )
     
     # Only auto-update demo balance if pnl is explicitly provided (avoid double-counting)
     if pnl is not None and order["trading_mode"] == "DEMO":
@@ -589,8 +642,62 @@ def save_cached_symbols(market_type, symbols):
         )
         conn.commit()
         conn.close()
-    except Exception as e:
-        print(f"Error saving cached symbols to DB: {e}")
+    except Exception as ex:
+        print(f"Error saving cached symbols: {ex}")
+
+def get_pnl_stats(trading_mode="LIVE"):
+    """Возвращает суммарный PnL закрытых сделок за 7 дней и за 30 дней."""
+    conn = get_db_connection()
+    try:
+        row_7d = conn.execute(
+            "SELECT SUM(pnl) FROM orders WHERE status NOT IN ('ACTIVE', 'PENDING') AND trading_mode = ? AND closed_at >= datetime('now', '-7 days')",
+            (trading_mode,)
+        ).fetchone()
+        pnl_7d = float(row_7d[0]) if row_7d and row_7d[0] is not None else 0.0
+
+        row_30d = conn.execute(
+            "SELECT SUM(pnl) FROM orders WHERE status NOT IN ('ACTIVE', 'PENDING') AND trading_mode = ? AND closed_at >= datetime('now', '-30 days')",
+            (trading_mode,)
+        ).fetchone()
+        pnl_30d = float(row_30d[0]) if row_30d and row_30d[0] is not None else 0.0
+
+        conn.close()
+        return {"pnl_7d": pnl_7d, "pnl_30d": pnl_30d}
+    except Exception as ex:
+        print(f"Error fetching PnL stats: {ex}")
+        try: conn.close()
+        except: pass
+        return {"pnl_7d": 0.0, "pnl_30d": 0.0}
+
+def get_daily_equity_history(trading_mode="LIVE"):
+    """Возвращает кумулятивную историю PnL/депозита по дням."""
+    conn = get_db_connection()
+    try:
+        rows = conn.execute('''
+            SELECT DATE(closed_at) as day_date, SUM(pnl) as day_pnl
+            FROM orders
+            WHERE status NOT IN ('ACTIVE', 'PENDING') AND trading_mode = ? AND closed_at IS NOT NULL
+            GROUP BY day_date
+            ORDER BY day_date ASC
+        ''', (trading_mode,)).fetchall()
+        conn.close()
+        
+        if not rows:
+            return []
+        
+        history = []
+        cum_pnl = 0.0
+        for idx, r in enumerate(rows):
+            dt_str = r["day_date"]
+            pnl_val = float(r["day_pnl"] or 0.0)
+            cum_pnl += pnl_val
+            history.append({"idx": idx, "date": dt_str, "pnl": pnl_val, "cum_pnl": cum_pnl})
+        return history
+    except Exception as ex:
+        print(f"Error fetching daily equity history: {ex}")
+        try: conn.close()
+        except: pass
+        return []
 
 def get_cached_symbols(market_type):
     try:

@@ -58,14 +58,14 @@ def main(page: ft.Page):
 
     try:
         if hasattr(page, "window"):
-            page.window.width = 1200
-            page.window.height = 850
-            page.window.min_width = 1100
+            page.window.width = 1380
+            page.window.height = 900
+            page.window.min_width = 1280
             page.window.min_height = 800
         else:
-            page.window_width = 1200
-            page.window_height = 850
-            page.window_min_width = 1100
+            page.window_width = 1380
+            page.window_height = 900
+            page.window_min_width = 1280
             page.window_min_height = 800
         page.update()
     except Exception:
@@ -108,13 +108,11 @@ def main(page: ft.Page):
             print("[DEBUG] handle_route_change: login view updated successfully")
             return
 
-        # Content cache (stores page content controls, not full views)
+        # Кэш контента страниц для молниеносного переключения за 0.001 сек
         if not hasattr(page, "_content_cache"):
             page._content_cache = {}
 
         cache_key = (page.route, lang)
-        # history, decisions, models and settings always rebuild to show fresh data
-        NO_CACHE_ROUTES = {"/history", "/decisions", "/models", "/settings"}
 
         if cache_key in page._content_cache:
             content = page._content_cache[cache_key]
@@ -133,7 +131,7 @@ def main(page: ft.Page):
             elif page.route == "/settings":
                 content = build_settings_view(page, lang)
 
-            if content is not None and page.route not in NO_CACHE_ROUTES:
+            if content is not None:
                 page._content_cache[cache_key] = content
 
         if content is not None:

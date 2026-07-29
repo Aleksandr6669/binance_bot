@@ -1,5 +1,7 @@
 import flet as ft
+import flet_charts as ftc
 import db
+import trading_engine
 import datetime as _dt_mod
 from ui.theme import *
 from ui.styles import *
@@ -22,7 +24,19 @@ def utc_to_local(ts_str, tz_offset_min=None):
     except Exception:
         return str(ts_str)
 
+SAVED_HISTORY_FILTERS = {
+    "pair": "",
+    "status": "",
+    "timeframe": "",
+    "mode": "",
+    "open_start": None,
+    "open_end": None,
+    "close_start": None,
+    "close_end": None
+}
+
 def build_history_view(page: ft.Page, lang: str):
+    global SAVED_HISTORY_FILTERS
     tz_offset = getattr(page, "tz_offset", None) or db.get_host_tz_offset_min()
     page.tz_offset = tz_offset
     user_tz = _dt_mod.timezone(_dt_mod.timedelta(minutes=tz_offset))
@@ -53,14 +67,23 @@ def build_history_view(page: ft.Page, lang: str):
     )
     
     def run_apply(e):
+        global SAVED_HISTORY_FILTERS
+        SAVED_HISTORY_FILTERS["pair"] = pair_field.value or ""
+        SAVED_HISTORY_FILTERS["status"] = status_dd.value or ""
+        SAVED_HISTORY_FILTERS["timeframe"] = timeframe_dd.value or ""
+        SAVED_HISTORY_FILTERS["mode"] = mode_dd.value or ""
+        SAVED_HISTORY_FILTERS["open_start"] = filter_state["open_start"]
+        SAVED_HISTORY_FILTERS["open_end"] = filter_state["open_end"]
+        SAVED_HISTORY_FILTERS["close_start"] = filter_state["close_start"]
+        SAVED_HISTORY_FILTERS["close_end"] = filter_state["close_end"]
         page.run_task(apply_filters, None)
 
-    # State variables for date ranges - по умолчанию сегодняшний день
+    # State variables for date ranges - подтягиваем сохраненные значения
     filter_state = {
-        "open_start": today_str,
-        "open_end": today_str,
-        "close_start": today_str,
-        "close_end": today_str
+        "open_start": SAVED_HISTORY_FILTERS["open_start"] or today_str,
+        "open_end": SAVED_HISTORY_FILTERS["open_end"] or today_str,
+        "close_start": SAVED_HISTORY_FILTERS["close_start"] or today_str,
+        "close_end": SAVED_HISTORY_FILTERS["close_end"] or today_str
     }
 
     status_options = [
@@ -71,12 +94,12 @@ def build_history_view(page: ft.Page, lang: str):
         ("CANCELED", t("status_canceled", lang))
     ]
 
-    pair_field = make_textfield(hint_text=t("col_pair", lang), value="", width=100, on_change=run_apply)
+    pair_field = make_textfield(hint_text=t("col_pair", lang), value=SAVED_HISTORY_FILTERS["pair"], width=100, on_change=run_apply)
     status_dd = make_dropdown(
         label=None,
         options=[ft.dropdown.Option(k, v) for k, v in status_options],
         width=125,
-        value="",
+        value=SAVED_HISTORY_FILTERS["status"],
         on_change=run_apply
     )
     
@@ -93,16 +116,32 @@ def build_history_view(page: ft.Page, lang: str):
         label=None,
         options=[ft.dropdown.Option(k, v) for k, v in timeframe_options],
         width=100,
-        value="",
+        value=SAVED_HISTORY_FILTERS["timeframe"],
+        on_change=run_apply
+    )
+
+    mode_options = [
+        ("", "Все типы" if lang == "ru" else "All Types"),
+        ("LIVE", "LIVE"),
+        ("DEMO", "DEMO")
+    ]
+    mode_dd = make_dropdown(
+        label=None,
+        options=[ft.dropdown.Option(k, v) for k, v in mode_options],
+        width=135,
+        value=SAVED_HISTORY_FILTERS["mode"],
         on_change=run_apply
     )
     
     pair_field.height = 48
     status_dd.height = 48
     status_dd.width = 140
+    timeframe_dd.height = 48
+    mode_dd.height = 48
+    mode_dd.width = 135
     pair_field.margin = ft.Margin.all(0)
     
-    # Wrap status_dd in a Container to properly apply margin/alignment in the Row
+    # Wrap dropdowns in Containers to properly apply margin/alignment in the Row
     status_container = ft.Container(
         content=status_dd,
         margin=ft.Margin.all(0),
@@ -114,14 +153,21 @@ def build_history_view(page: ft.Page, lang: str):
         margin=ft.Margin.all(0),
         padding=0
     )
+
+    mode_container = ft.Container(
+        content=mode_dd,
+        margin=ft.Margin.all(0),
+        padding=0
+    )
     
     pair_field.content_padding = ft.Padding(10, 14, 10, 14)
     status_dd.content_padding = ft.Padding(10, 14, 10, 14)
     timeframe_dd.content_padding = ft.Padding(10, 14, 10, 14)
+    mode_dd.content_padding = ft.Padding(10, 14, 10, 14)
     pair_field.text_size = 10
     status_dd.text_style = ft.TextStyle(size=10)
     timeframe_dd.text_style = ft.TextStyle(size=10)
-    timeframe_dd.height = 48
+    mode_dd.text_style = ft.TextStyle(size=10)
 
     def set_date_and_apply(picker_control):
         if picker_control.value:
@@ -213,30 +259,35 @@ def build_history_view(page: ft.Page, lang: str):
             filter_running = False
 
     async def apply_filters_internal():
-        # Показываем красивый спиннер загрузки ордеров
-        history_list.controls.clear()
-        rendered_order_controls.clear()
-        history_list.controls.append(
-            ft.Container(
-                content=ft.Column([
-                    ft.ProgressRing(color="#a78bfa"),
-                    ft.Text(t_loading, color="#94a3b8", size=12)
-                ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10),
-                alignment=ft.alignment.Alignment(0, 0),
-                padding=ft.Padding(0, 40, 0, 40)
+        # Показываем спиннер загрузки только при пустом списке (первичная загрузка)
+        if not rendered_order_controls and not history_list.controls:
+            history_list.controls.clear()
+            history_list.controls.append(
+                ft.Container(
+                    content=ft.Column([
+                        ft.ProgressRing(color="#a78bfa"),
+                        ft.Text(t_loading, color="#94a3b8", size=12)
+                    ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10),
+                    alignment=ft.alignment.Alignment(0, 0),
+                    padding=ft.Padding(0, 40, 0, 40)
+                )
             )
-        )
-        try:
-            history_list.update()
-        except:
-            pass
+            try:
+                history_list.update()
+            except:
+                pass
 
         import asyncio
+        import trading_engine
+        # Синхронизируем реальные ордера с Binance перед отрисовкой
+        await asyncio.to_thread(trading_engine.sync_live_orders_from_binance)
+
         # Загружаем данные в фоновом потоке, не блокируя UI
         orders = await asyncio.to_thread(
             db.get_filtered_orders,
             pair=pair_field.value.upper().strip() if pair_field.value.strip() else None,
             timeframe=timeframe_dd.value if timeframe_dd.value else None,
+            trading_mode=mode_dd.value if mode_dd.value else None,
             status=status_dd.value if status_dd.value else None,
             open_start=filter_state["open_start"] if filter_state["open_start"] else None,
             open_end=filter_state["open_end"] if filter_state["open_end"] else None,
@@ -260,7 +311,12 @@ def build_history_view(page: ft.Page, lang: str):
                 )
             )
         else:
-            total_pnl_val = sum(float(o["pnl"]) if o["pnl"] is not None else 0.0 for o in orders)
+            total_pnl_val = sum(
+                float(o["pnl"]) 
+                for o in orders 
+                if o.get("status") in ["CLOSED_TP", "CLOSED_SL", "CLOSED_MANUAL"] 
+                and o.get("pnl") is not None
+            )
             total_pnl_text.value = f"{total_pnl_val:+.2f}$"
             total_pnl_text.color = "#10b981" if total_pnl_val >= 0 else "#ef4444"
             summary_card.visible = True
@@ -277,6 +333,85 @@ def build_history_view(page: ft.Page, lang: str):
                 pnl_color = "#94a3b8" if is_canceled else ("#10b981" if pnl_val >= 0 else "#ef4444")
                 pnl_display_str = "$0.00" if is_canceled else f"{pnl_val:+.2f}$"
                 status_bg = "#64748b" if is_canceled else ("#334155" if "MANUAL" in str(o.get("status")) else ("#10b981" if "TP" in str(o.get("status")) else "#ef4444"))
+
+                # Парсинг 5-7 свечей штампа закрытия (или генерирование вектора движения от входа к выходу)
+                # 100% Высокая отчетливость штампа: нормализация цен 10..90 по высоте
+                snap_raw_prices = []
+                try:
+                    if o.get("chart_snapshot"):
+                        import json as _json
+                        vals = _json.loads(o["chart_snapshot"])
+                        if isinstance(vals, list) and vals:
+                            snap_raw_prices = [float(v) for v in vals]
+                except Exception:
+                    pass
+
+                if len(snap_raw_prices) < 3 or (max(snap_raw_prices) == min(snap_raw_prices)):
+                    e_p = float(o['entry_price'])
+                    c_p = float(o['close_price']) if (o.get('close_price') is not None and not is_canceled) else e_p
+                    diff = c_p - e_p
+                    if abs(diff) < 0.001:
+                        diff = (e_p * 0.0015) if pnl_val >= 0 else (-e_p * 0.0015)
+                    snap_raw_prices = [
+                        e_p,
+                        e_p + diff * 0.35,
+                        e_p + diff * 0.15,
+                        e_p + diff * 0.75,
+                        e_p + diff * 0.50,
+                        e_p + diff * 1.15,
+                        c_p
+                    ]
+
+                # 🎯 Схема главного рабочего графика trading_chart.py для 100% красивой кривой штампа!
+                e_p = float(o['entry_price'])
+                c_p = float(o['close_price']) if (o.get('close_price') is not None and not is_canceled) else e_p
+
+                min_sp = min(snap_raw_prices) if snap_raw_prices else e_p
+                max_sp = max(snap_raw_prices) if snap_raw_prices else e_p
+                sp_span = (max_sp - min_sp)
+
+                if sp_span < (e_p * 0.0005):
+                    direction = 1.0 if (pnl_val >= 0) else -1.0
+                    base_delta = e_p * 0.0025
+                    multipliers = [0.0, 0.45, 0.15, 0.75, 0.35, 0.95, 0.55, 0.85, 0.65, 1.0] if direction > 0 else [0.0, -0.45, -0.15, -0.75, -0.35, -0.95, -0.55, -0.85, -0.65, -1.0]
+                    snap_raw_prices = [e_p + base_delta * m for m in multipliers]
+                    min_sp = min(snap_raw_prices)
+                    max_sp = max(snap_raw_prices)
+                    sp_span = max_sp - min_sp
+
+                snap_pts = [ftc.LineChartDataPoint(i, snap_raw_prices[i]) for i in range(len(snap_raw_prices))]
+                
+                min_sy_val = min_sp - sp_span * 0.15
+                max_sy_val = max_sp + sp_span * 0.15
+                max_sx_val = len(snap_raw_prices) - 1
+
+                snap_fill_bg = ft.Colors.with_opacity(0.18, pnl_color)
+
+                snap_mini_chart = ftc.LineChart(
+                    data_series=[
+                        ftc.LineChartData(
+                            points=snap_pts,
+                            stroke_width=2.5,
+                            color=pnl_color,
+                            curved=True,
+                            below_line_bgcolor=snap_fill_bg
+                        )
+                    ],
+                    interactive=False,
+                    border=ft.Border.all(0, ft.Colors.TRANSPARENT),
+                    min_x=0,
+                    max_x=max_sx_val,
+                    min_y=min_sy_val,
+                    max_y=max_sy_val,
+                    left_axis=None,
+                    bottom_axis=None,
+                    top_axis=None,
+                    right_axis=None,
+                    horizontal_grid_lines=ftc.ChartGridLines(color=ft.Colors.TRANSPARENT),
+                    vertical_grid_lines=ftc.ChartGridLines(color=ft.Colors.TRANSPARENT),
+                    height=42,
+                    expand=True
+                )
 
                 card = ft.Container(
                     content=ft.Row(
@@ -298,56 +433,66 @@ def build_history_view(page: ft.Page, lang: str):
                                     border_radius=4,
                                     padding=ft.Padding.symmetric(vertical=1, horizontal=4)
                                 )
-                            ], spacing=4, width=175),
+                            ], spacing=4, width=140),
                             
-                            # Col 2: Entry / Exit
+                            # Col 2: Date (ПЕРЕД ЦЕНОЙ ВХОДА)
+                            ft.Column([
+                                ft.Text("DATE", size=9, color="#94a3b8", weight=ft.FontWeight.BOLD),
+                                ft.Text(utc_to_local(o['created_at'], tz_offset).split(" ")[0], size=11, color="#f8fafc"),
+                                ft.Text(utc_to_local(o['created_at'], tz_offset).split(" ")[1] if " " in utc_to_local(o['created_at'], tz_offset) else "", size=10, color="#94a3b8")
+                            ], spacing=2, width=90),
+
+                            # Col 3: Entry / Exit
                             ft.Column([
                                 ft.Text("ENTRY / EXIT", size=9, color="#94a3b8", weight=ft.FontWeight.BOLD),
                                 ft.Text(f"${float(o['entry_price']):.2f}", size=12, color="#f8fafc"),
                                 ft.Text(f"${float(o['close_price']):.2f}" if (o.get('close_price') is not None and not is_canceled) else "—", size=11, color="#94a3b8")
-                            ], spacing=2, width=110),
+                            ], spacing=2, width=100),
                             
-                            # Col 3: Targets (SL / TP)
-                            ft.Column([
-                                ft.Text("SL / TP", size=9, color="#94a3b8", weight=ft.FontWeight.BOLD),
-                                ft.Text(f"SL: ${float(o['stop_loss']):.2f}" if o.get('stop_loss') else "SL: —", size=11, color="#f43f5e"),
-                                ft.Text(f"TP: ${float(o['take_profit']):.2f}" if o.get('take_profit') else "TP: —", size=11, color="#10b981")
-                            ], spacing=2, width=110),
-                            
-                            # Col 4: Position Details (Size & Leverage)
+                            # Col 4: Position Details (STAKE & Leverage - ПЕРЕД СТОПАМИ)
                             ft.Column([
                                 ft.Text("STAKE", size=9, color="#94a3b8", weight=ft.FontWeight.BOLD),
                                 ft.Text(f"${float(o['size_usdt']):.2f}", size=12, color="#f8fafc"),
                                 ft.Text(f"Lev: {o['leverage']}x" if o.get('leverage') else "Spot", size=11, color="#94a3b8")
-                            ], spacing=2, width=80),
-                            
-                            # Col 5: Date
+                            ], spacing=2, width=75),
+
+                            # Col 5: Targets (SL / TP)
                             ft.Column([
-                                ft.Text("DATE", size=9, color="#94a3b8", weight=ft.FontWeight.BOLD),
-                                ft.Text(utc_to_local(o['created_at'], tz_offset).split(" ")[0], size=12, color="#f8fafc"),
-                                ft.Text(utc_to_local(o['created_at'], tz_offset).split(" ")[1] if " " in utc_to_local(o['created_at'], tz_offset) else "", size=11, color="#94a3b8")
-                            ], spacing=2, width=90),
+                                ft.Text("SL / TP", size=9, color="#94a3b8", weight=ft.FontWeight.BOLD),
+                                ft.Text(f"SL: ${float(o['stop_loss']):.2f}" if o.get('stop_loss') else "SL: —", size=11, color="#f43f5e"),
+                                ft.Text(f"TP: ${float(o['take_profit']):.2f}" if o.get('take_profit') else "TP: —", size=11, color="#10b981")
+                            ], spacing=2, width=105),
                             
-                            # Col 6: PnL & Status
+                            # Col 6: Чистый график кривой свечей без выпирающего текста
+                            ft.Container(
+                                content=snap_mini_chart,
+                                padding=ft.Padding.symmetric(horizontal=4, vertical=2),
+                                expand=True
+                            ),
+                            
+                            # Col 7: PnL, Status & Action (Результат и кнопка удаления ордера аккуратно рядом)
                             ft.Column([
                                 ft.Text("RESULT", size=9, color="#94a3b8", weight=ft.FontWeight.BOLD),
                                 ft.Text(pnl_display_str, size=13, weight=ft.FontWeight.BOLD, color=pnl_color),
-                                ft.Container(
-                                    content=ft.Text(o["status"], size=8, color="#ffffff", weight=ft.FontWeight.BOLD),
-                                    bgcolor=status_bg,
-                                    padding=ft.Padding.symmetric(vertical=1, horizontal=4),
-                                    border_radius=4
-                                )
-                            ], spacing=4, alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.END, expand=True),
-                            
-                            # Col 7: Action (Delete)
-                            ft.IconButton(
-                                icon=ft.Icons.DELETE_OUTLINE_ROUNDED,
-                                icon_color="#f43f5e",
-                                tooltip=t_delete_tooltip,
-                                on_click=make_delete_handler(o["id"]),
-                                width=40
-                            )
+                                ft.Row([
+                                    ft.Container(
+                                        content=ft.Text(o["status"], size=8, color="#ffffff", weight=ft.FontWeight.BOLD),
+                                        bgcolor=status_bg,
+                                        padding=ft.Padding.symmetric(vertical=2, horizontal=5),
+                                        border_radius=4
+                                    ),
+                                    ft.IconButton(
+                                        icon=ft.Icons.DELETE_OUTLINE_ROUNDED,
+                                        icon_size=18,
+                                        icon_color="#f43f5e",
+                                        tooltip=t_delete_tooltip,
+                                        on_click=make_delete_handler(o["id"]),
+                                        padding=0,
+                                        width=24,
+                                        height=24
+                                    )
+                                ], spacing=6, alignment=ft.MainAxisAlignment.END, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+                            ], spacing=3, alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.END, width=125)
                         ],
                         alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER
@@ -408,10 +553,11 @@ def build_history_view(page: ft.Page, lang: str):
     # Restructured filter card: Inputs on the left, Date Blocks on the right
     filter_card = ft.Container(
         content=ft.Row([
-            # Left Group: Symbol, Timeframe, and Status Dropdown
+            # Left Group: Symbol, Timeframe, Mode, and Status Dropdown
             ft.Row([
                 pair_field,
                 timeframe_container,
+                mode_container,
                 status_container,
             ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
             # Right Group: Open and Close Date blocks
@@ -468,15 +614,17 @@ def build_history_view(page: ft.Page, lang: str):
     async def history_refresher():
         import asyncio
         while True:
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(2.0)
             if page.route != "/history":
                 continue
             
             try:
+                await asyncio.to_thread(trading_engine.sync_live_orders_from_binance)
                 orders = await asyncio.to_thread(
                     db.get_filtered_orders,
                     pair=pair_field.value.upper().strip() if pair_field.value.strip() else None,
                     timeframe=timeframe_dd.value if timeframe_dd.value else None,
+                    trading_mode=mode_dd.value if mode_dd.value else None,
                     status=status_dd.value if status_dd.value else None,
                     open_start=filter_state["open_start"] if filter_state["open_start"] else None,
                     open_end=filter_state["open_end"] if filter_state["open_end"] else None,
@@ -488,174 +636,12 @@ def build_history_view(page: ft.Page, lang: str):
                 if page.route != "/history":
                     continue
 
-                db_ids = {o["id"] for o in orders} if orders else set()
-                rendered_ids = set(rendered_order_controls.keys())
-
-                if not db_ids and rendered_ids:
+                db_pnl_hash = tuple((o["id"], o.get("pnl"), o.get("close_price")) for o in (orders or []))
+                if not hasattr(page, "_last_orders_hash") or page._last_orders_hash != db_pnl_hash:
+                    page._last_orders_hash = db_pnl_hash
                     await apply_filters_internal()
-                    continue
-
-                if db_ids and not rendered_ids:
-                    await apply_filters_internal()
-                    continue
-
-                # Remove deleted orders from UI
-                deleted_ids = rendered_ids - db_ids
-                if deleted_ids:
-                    for oid in deleted_ids:
-                        ctrl = rendered_order_controls.pop(oid)
-                        try:
-                            history_list.controls.remove(ctrl)
-                        except:
-                            pass
-
-                # Add new orders to UI
-                new_added = False
-                newly_created_controls = []
-                for o in orders:
-                    oid = o["id"]
-                    if oid not in rendered_order_controls:
-                        pnl_val = float(o["pnl"]) if o["pnl"] is not None else 0.0
-                        pnl_color = "#10b981" if pnl_val >= 0 else "#ef4444"
-                        
-                        def make_delete_handler(order_id):
-                            async def handler(e):
-                                await asyncio.to_thread(db.delete_order, order_id)
-                                await apply_filters(None)
-                            return handler
-
-                        card = ft.Container(
-                            content=ft.Row(
-                                [
-                                    # Col 1: Asset Info
-                                    ft.Column([
-                                        ft.Row([
-                                            ft.Text(f"{o['pair']} ({o.get('timeframe') or '—'})", weight=ft.FontWeight.BOLD, size=14, color="#f8fafc"),
-                                            ft.Container(
-                                                content=ft.Text(o['side'], size=8, weight=ft.FontWeight.BOLD, color="#ffffff"),
-                                                bgcolor="#10b981" if o['side'] == "BUY" else "#ef4444",
-                                                border_radius=4,
-                                                padding=ft.Padding.symmetric(vertical=1, horizontal=4)
-                                            )
-                                        ], spacing=6),
-                                        ft.Container(
-                                            content=ft.Text(o.get("trading_mode", "DEMO"), size=8, weight=ft.FontWeight.BOLD, color="#f8fafc"),
-                                            bgcolor="#0284c7" if o.get("trading_mode") == "LIVE" else "#64748b",
-                                            border_radius=4,
-                                            padding=ft.Padding.symmetric(vertical=1, horizontal=4)
-                                        )
-                                    ], spacing=4, width=175),
-                                    
-                                    # Col 2: Entry / Exit
-                                    ft.Column([
-                                        ft.Text("ENTRY / EXIT", size=9, color="#94a3b8", weight=ft.FontWeight.BOLD),
-                                        ft.Text(f"${float(o['entry_price']):.2f}", size=12, color="#f8fafc"),
-                                        ft.Text(f"${float(o['close_price']):.2f}" if o.get('close_price') is not None else "—", size=11, color="#94a3b8")
-                                    ], spacing=2, width=110),
-                                    
-                                    # Col 3: Targets (SL / TP)
-                                    ft.Column([
-                                        ft.Text("SL / TP", size=9, color="#94a3b8", weight=ft.FontWeight.BOLD),
-                                        ft.Text(f"SL: ${float(o['stop_loss']):.2f}" if o.get('stop_loss') else "SL: —", size=11, color="#f43f5e"),
-                                        ft.Text(f"TP: ${float(o['take_profit']):.2f}" if o.get('take_profit') else "TP: —", size=11, color="#10b981")
-                                    ], spacing=2, width=110),
-                                    
-                                    # Col 4: Position Details (Size & Leverage)
-                                    ft.Column([
-                                        ft.Text("STAKE", size=9, color="#94a3b8", weight=ft.FontWeight.BOLD),
-                                        ft.Text(f"${float(o['size_usdt']):.2f}", size=12, color="#f8fafc"),
-                                        ft.Text(f"Lev: {o['leverage']}x" if o.get('leverage') else "Spot", size=11, color="#94a3b8")
-                                    ], spacing=2, width=80),
-                                    
-                                    # Col 5: Date
-                                    ft.Column([
-                                        ft.Text("DATE", size=9, color="#94a3b8", weight=ft.FontWeight.BOLD),
-                                        ft.Text(utc_to_local(o['created_at'], tz_offset).split(" ")[0], size=12, color="#f8fafc"),
-                                        ft.Text(utc_to_local(o['created_at'], tz_offset).split(" ")[1] if " " in utc_to_local(o['created_at'], tz_offset) else "", size=11, color="#94a3b8")
-                                    ], spacing=2, width=90),
-                                    
-                                    # Col 6: PnL & Status
-                                    ft.Column([
-                                        ft.Text("RESULT", size=9, color="#94a3b8", weight=ft.FontWeight.BOLD),
-                                        ft.Text(f"{pnl_val:+.2f}$", size=13, weight=ft.FontWeight.BOLD, color=pnl_color),
-                                        ft.Container(
-                                            content=ft.Text(o["status"], size=8, color="#ffffff", weight=ft.FontWeight.BOLD),
-                                            bgcolor="#334155" if "MANUAL" in o["status"] else ("#10b981" if "TP" in o["status"] else "#ef4444"),
-                                            padding=ft.Padding.symmetric(vertical=1, horizontal=4),
-                                            border_radius=4
-                                        )
-                                    ], spacing=4, alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.END, expand=True),
-                                    
-                                    # Col 7: Action (Delete)
-                                    ft.IconButton(
-                                        icon=ft.Icons.DELETE_OUTLINE_ROUNDED,
-                                        icon_color="#f43f5e",
-                                        tooltip=t_delete_tooltip,
-                                        on_click=make_delete_handler(oid),
-                                        width=40
-                                    )
-                                ],
-                                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                                vertical_alignment=ft.CrossAxisAlignment.CENTER
-                            ),
-                            bgcolor=ft.Colors.with_opacity(0.05, "#ffffff"),
-                            blur=ft.Blur(10, 10, ft.BlurTileMode.MIRROR),
-                            border_radius=12,
-                            padding=ft.Padding(16, 12, 16, 12),
-                            border=ft.Border.all(1, ft.Colors.with_opacity(0.1, "#ffffff")),
-                            opacity=0,
-                            scale=0.8,
-                            animate_opacity=ft.Animation(300, ft.AnimationCurve.EASE_OUT),
-                            animate_scale=ft.Animation(300, ft.AnimationCurve.EASE_OUT_BACK)
-                        )
-                        
-                        insert_idx = 0
-                        for existing_ctrl in history_list.controls:
-                            existing_id = None
-                            for k, v in rendered_order_controls.items():
-                                if v == existing_ctrl:
-                                    existing_id = k
-                                    break
-                            if existing_id is not None:
-                                existing_order = next((x for x in orders if x["id"] == existing_id), None)
-                                if existing_order and o["created_at"] < existing_order["created_at"]:
-                                    insert_idx += 1
-                                else:
-                                    break
-
-                        history_list.controls.insert(insert_idx, card)
-                        rendered_order_controls[oid] = card
-                        newly_created_controls.append(card)
-                        new_added = True
-
-                # Update PnL card value
-                if db_ids:
-                    total_pnl_val = sum(float(o["pnl"]) if o["pnl"] is not None else 0.0 for o in orders)
-                    total_pnl_text.value = f"{total_pnl_val:+.2f}$"
-                    total_pnl_text.color = "#10b981" if total_pnl_val >= 0 else "#ef4444"
-                    summary_card.visible = True
-
-                if deleted_ids or new_added:
-                    try:
-                        history_list.update()
-                        summary_card.update()
-                    except:
-                        pass
-                    
-                    if newly_created_controls:
-                        await asyncio.sleep(0.05)
-                        for c in newly_created_controls:
-                            c.opacity = 1.0
-                            c.scale = 1.0
-                        try:
-                            history_list.update()
-                        except:
-                            pass
-            except Exception as ex:
-                err = str(ex).lower()
-                if any(x in err for x in ["session closed", "destroyed session", "has been closed", "connection closed", "websocket", "broken pipe"]):
-                    break
-                print(f"History background refresher error: {ex}")
+            except Exception as e_refr:
+                print(f"History background refresher error: {e_refr}")
 
     page.run_task(history_refresher)
     

@@ -25,7 +25,7 @@ def make_textfield(label=None, value="", password=False, can_reveal_password=Fal
     )
 
 def make_dropdown(label=None, options=None, value=None, width=None, on_change=None, disabled=False):
-    return ft.Dropdown(
+    dd = ft.Dropdown(
         label=label,
         options=options or [],
         value=value,
@@ -43,3 +43,9 @@ def make_dropdown(label=None, options=None, value=None, width=None, on_change=No
         on_select=on_change,
         disabled=disabled
     )
+    if on_change is not None:
+        try:
+            dd.on_change = on_change
+        except Exception:
+            pass
+    return dd
