@@ -153,6 +153,18 @@ def init_db():
     )
     ''')
 
+    # Daily Balances Snapshots table
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS daily_balances (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT NOT NULL,
+        trading_mode TEXT NOT NULL DEFAULT 'LIVE',
+        balance REAL NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(date, trading_mode)
+    )
+    ''')
+
     # Symbol Cache table to persist downloaded Binance trading pairs
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS symbol_cache (
@@ -264,19 +276,29 @@ def create_order(pair, side, entry_price, stop_loss, take_profit, amount, size_u
     conn.close()
     upload_db_to_hf_async()
 
-def update_order_sync_data(order_id, entry_price, amount, leverage=None):
+def update_order_sync_data(order_id, entry_price, amount=None, leverage=None):
     """Обновляет точные параметры входа позиции с биржи Binance."""
     try:
         conn = get_db_connection()
-        if leverage:
+        if leverage and amount is not None:
             conn.execute(
                 "UPDATE orders SET entry_price = ?, amount = ?, size_usdt = ?, leverage = ? WHERE id = ?",
                 (float(entry_price), float(amount), float(entry_price) * float(amount), int(leverage), int(order_id))
             )
-        else:
+        elif amount is not None:
             conn.execute(
                 "UPDATE orders SET entry_price = ?, amount = ?, size_usdt = ? WHERE id = ?",
                 (float(entry_price), float(amount), float(entry_price) * float(amount), int(order_id))
+            )
+        elif leverage:
+            conn.execute(
+                "UPDATE orders SET entry_price = ?, leverage = ? WHERE id = ?",
+                (float(entry_price), int(leverage), int(order_id))
+            )
+        else:
+            conn.execute(
+                "UPDATE orders SET entry_price = ? WHERE id = ?",
+                (float(entry_price), int(order_id))
             )
         conn.commit()
         conn.close()
@@ -362,7 +384,7 @@ def save_market_candle(pair, timeframe, open_time, open_p, high, low, close, vol
     except Exception as e:
         pass  # Non-critical, don't break the main cycle
 
-def close_order(order_id, status=None, close_price=None, pnl=None, chart_snapshot=None):
+def close_order(order_id, status=None, close_price=None, pnl=None, chart_snapshot=None, binance_close_order_id=None):
     conn = get_db_connection()
     order = conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
     if not order:
@@ -373,24 +395,48 @@ def close_order(order_id, status=None, close_price=None, pnl=None, chart_snapsho
     _status = status or "CLOSED_MANUAL"
     _pnl = pnl if pnl is not None else 0.0
     _close_price = close_price if close_price is not None else None
+    _b_close_id = str(binance_close_order_id) if binance_close_order_id else None
     
     if chart_snapshot is not None:
-        conn.execute(
-            "UPDATE orders SET status = ?, pnl = ?, close_price = ?, chart_snapshot = ?, closed_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (_status, _pnl, _close_price, str(chart_snapshot), order_id)
-        )
+        if _b_close_id:
+            conn.execute(
+                "UPDATE orders SET status = ?, pnl = ?, close_price = ?, chart_snapshot = ?, binance_close_order_id = ?, closed_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (_status, _pnl, _close_price, str(chart_snapshot), _b_close_id, order_id)
+            )
+        else:
+            conn.execute(
+                "UPDATE orders SET status = ?, pnl = ?, close_price = ?, chart_snapshot = ?, closed_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (_status, _pnl, _close_price, str(chart_snapshot), order_id)
+            )
     else:
-        conn.execute(
-            "UPDATE orders SET status = ?, pnl = ?, close_price = ?, closed_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (_status, _pnl, _close_price, order_id)
-        )
+        if _b_close_id:
+            conn.execute(
+                "UPDATE orders SET status = ?, pnl = ?, close_price = ?, binance_close_order_id = ?, closed_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (_status, _pnl, _close_price, _b_close_id, order_id)
+            )
+        else:
+            conn.execute(
+                "UPDATE orders SET status = ?, pnl = ?, close_price = ?, closed_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (_status, _pnl, _close_price, order_id)
+            )
     
-    # Only auto-update demo balance if pnl is explicitly provided (avoid double-counting)
-    if pnl is not None and order["trading_mode"] == "DEMO":
-        user_row = conn.execute("SELECT demo_balance FROM settings WHERE id = 1").fetchone()
-        if user_row:
-            new_balance = user_row["demo_balance"] + _pnl
-            conn.execute("UPDATE settings SET demo_balance = ? WHERE id = 1", (new_balance,))
+    # Авто-обновление баланса и суточных снимков после закрытия каждой сделки
+    t_mode = order["trading_mode"] if order else "DEMO"
+    if t_mode == "DEMO":
+        if pnl is not None:
+            user_row = conn.execute("SELECT demo_balance FROM settings WHERE id = 1").fetchone()
+            if user_row:
+                new_balance = float(user_row["demo_balance"]) + _pnl
+                conn.execute("UPDATE settings SET demo_balance = ? WHERE id = 1", (new_balance,))
+                save_daily_balance("DEMO", new_balance)
+    elif t_mode == "LIVE":
+        try:
+            import trading_engine
+            live_bal = trading_engine.fetch_binance_balance(order.get("market_type", "FUTURES"))
+            if live_bal and live_bal > 0:
+                save_daily_balance("LIVE", live_bal)
+        except Exception:
+            pass
             
     conn.commit()
     conn.close()
@@ -441,14 +487,15 @@ def get_all_analysis_logs():
 
 def should_persist_analysis_log(pair, stage3_output, min_interval_seconds=30, timeframe=None):
     import json
-    from datetime import datetime
+    from datetime import datetime, timezone
     latest = get_latest_analysis_log(pair, timeframe=timeframe)
     if not latest:
         return True
     
+    utc_now = datetime.now(timezone.utc).replace(tzinfo=None)
     try:
         latest_time = datetime.strptime(latest["created_at"], "%Y-%m-%d %H:%M:%S")
-        if (datetime.utcnow() - latest_time).total_seconds() < min_interval_seconds:
+        if (utc_now - latest_time).total_seconds() < min_interval_seconds:
             return False
     except Exception:
         pass
@@ -460,7 +507,7 @@ def should_persist_analysis_log(pair, stage3_output, min_interval_seconds=30, ti
         
         if not action_changed:
             latest_time = datetime.strptime(latest["created_at"], "%Y-%m-%d %H:%M:%S")
-            time_diff = (datetime.utcnow() - latest_time).total_seconds()
+            time_diff = (utc_now - latest_time).total_seconds()
             if time_diff < 300:
                 return False
     except Exception:
@@ -526,8 +573,11 @@ def get_filtered_orders(pair=None, trading_mode=None, side=None, status=None, op
         query += " AND side = ?"
         params.append(side)
     if status:
-        query += " AND status = ?"
-        params.append(status)
+        if status == "CLOSED_AI":
+            query += " AND status LIKE 'CLOSED_AI%'"
+        else:
+            query += " AND status = ?"
+            params.append(status)
     if open_start:
         query += " AND created_at >= ?"
         params.append(local_date_to_utc(open_start, end_of_day=False))
@@ -669,17 +719,98 @@ def get_pnl_stats(trading_mode="LIVE"):
         except: pass
         return {"pnl_7d": 0.0, "pnl_30d": 0.0}
 
-def get_daily_equity_history(trading_mode="LIVE"):
-    """Возвращает кумулятивную историю PnL/депозита по дням."""
+def save_daily_balance(trading_mode="LIVE", balance=0.0, date_str=None):
+    """Сохраняет снимки ежедневного баланса депозита по дням."""
+    if not date_str:
+        import datetime
+        date_str = datetime.date.today().strftime('%Y-%m-%d')
+    conn = get_db_connection()
+    try:
+        conn.execute('''
+            INSERT INTO daily_balances (date, trading_mode, balance)
+            VALUES (?, ?, ?)
+            ON CONFLICT(date, trading_mode) DO UPDATE SET balance = excluded.balance, created_at = CURRENT_TIMESTAMP
+        ''', (date_str, trading_mode, float(balance)))
+        conn.commit()
+        conn.close()
+    except Exception as ex:
+        print(f"Error saving daily balance: {ex}")
+        try: conn.close()
+        except: pass
+
+def get_daily_balances(trading_mode="LIVE", days=30):
+    """Возвращает историю снимков баланса по дням."""
+    conn = get_db_connection()
+    try:
+        rows = conn.execute('''
+            SELECT date, balance
+            FROM daily_balances
+            WHERE trading_mode = ? AND date >= DATE('now', '-' || ? || ' days')
+            ORDER BY date ASC
+        ''', (trading_mode, str(days))).fetchall()
+        conn.close()
+        return [{"date": r["date"], "balance": float(r["balance"])} for r in rows]
+    except Exception as ex:
+        print(f"Error fetching daily balances: {ex}")
+        try: conn.close()
+        except: pass
+        return []
+
+def get_daily_equity_history(trading_mode="LIVE", days=30):
+    """Возвращает кумулятивную историю PnL/депозита по дням из базы данных (снимки баланса или история ордеров)."""
+    daily_snaps = get_daily_balances(trading_mode=trading_mode, days=days)
+    base_bal = daily_snaps[0]["balance"] if daily_snaps else 22.0
+
+    conn = get_db_connection()
+    try:
+        rows = conn.execute('''
+            SELECT closed_at, pnl
+            FROM orders
+            WHERE status NOT IN ('ACTIVE', 'PENDING') AND trading_mode = ? AND closed_at IS NOT NULL
+            ORDER BY closed_at ASC
+        ''', (trading_mode,)).fetchall()
+        conn.close()
+        
+        history = []
+        curr_bal = base_bal
+        history.append({"idx": 0, "balance": curr_bal, "pnl": 0.0, "cum_pnl": 0.0})
+
+        if rows:
+            for idx, r in enumerate(rows):
+                pnl_val = float(r["pnl"] or 0.0)
+                curr_bal += pnl_val
+                cum_pnl = curr_bal - base_bal
+                history.append({"idx": idx + 1, "closed_at": str(r["closed_at"]), "balance": curr_bal, "pnl": pnl_val, "cum_pnl": cum_pnl})
+        
+        if daily_snaps and len(daily_snaps) > 1:
+            today_bal = daily_snaps[-1]["balance"]
+            if abs(history[-1]["balance"] - today_bal) > 0.01:
+                history.append({
+                    "idx": len(history),
+                    "date": daily_snaps[-1]["date"],
+                    "balance": today_bal,
+                    "pnl": today_bal - history[-1]["balance"],
+                    "cum_pnl": today_bal - base_bal
+                })
+        return history
+    except Exception as ex:
+        print(f"Error fetching daily equity history: {ex}")
+        try: conn.close()
+        except: pass
+        return []
+
     conn = get_db_connection()
     try:
         rows = conn.execute('''
             SELECT DATE(closed_at) as day_date, SUM(pnl) as day_pnl
             FROM orders
-            WHERE status NOT IN ('ACTIVE', 'PENDING') AND trading_mode = ? AND closed_at IS NOT NULL
+            WHERE status NOT IN ('ACTIVE', 'PENDING') 
+              AND trading_mode = ? 
+              AND closed_at IS NOT NULL
+              AND closed_at >= DATE('now', '-' || ? || ' days')
             GROUP BY day_date
             ORDER BY day_date ASC
-        ''', (trading_mode,)).fetchall()
+        ''', (trading_mode, str(days))).fetchall()
         conn.close()
         
         if not rows:
@@ -695,6 +826,34 @@ def get_daily_equity_history(trading_mode="LIVE"):
         return history
     except Exception as ex:
         print(f"Error fetching daily equity history: {ex}")
+        try: conn.close()
+        except: pass
+        return []
+
+def get_equity_trajectory(trading_mode="LIVE"):
+    """Возвращает подробную посделочную историю кумулятивного PnL для плавного красивого графика."""
+    conn = get_db_connection()
+    try:
+        rows = conn.execute('''
+            SELECT closed_at, pnl
+            FROM orders
+            WHERE status NOT IN ('ACTIVE', 'PENDING') AND trading_mode = ? AND closed_at IS NOT NULL
+            ORDER BY closed_at ASC
+        ''', (trading_mode,)).fetchall()
+        conn.close()
+        
+        if not rows:
+            return []
+        
+        history = []
+        cum_pnl = 0.0
+        for idx, r in enumerate(rows):
+            pnl_val = float(r["pnl"] or 0.0)
+            cum_pnl += pnl_val
+            history.append({"idx": idx, "closed_at": str(r["closed_at"]), "pnl": pnl_val, "cum_pnl": cum_pnl})
+        return history
+    except Exception as ex:
+        print(f"Error fetching equity trajectory: {ex}")
         try: conn.close()
         except: pass
         return []

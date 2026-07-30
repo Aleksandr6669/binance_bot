@@ -122,17 +122,41 @@ def build_settings_view(page: ft.Page, lang: str):
         import trading_engine
         px = trading_engine.get_binance_proxies()
         proxy_url = px.get("http") if px else None
-        if proxy_url:
-            with httpx.Client(proxy=proxy_url, timeout=5) as client:
-                res = client.get("https://api.ipify.org?format=json")
+        
+        urls = [
+            "https://api.ipify.org?format=json",
+            "https://ipinfo.io/json",
+            "https://ifconfig.me/ip",
+            "https://icanhazip.com"
+        ]
+        
+        for url in urls:
+            try:
+                if proxy_url:
+                    with httpx.Client(proxy=proxy_url, timeout=3.0) as client:
+                        res = client.get(url)
+                else:
+                    res = httpx.get(url, timeout=3.0)
                 if res.status_code == 200:
-                    server_ip = res.json().get("ip", "Unknown")
-        else:
-            res = httpx.get("https://api.ipify.org?format=json", timeout=5)
-            if res.status_code == 200:
-                server_ip = res.json().get("ip", "Unknown")
+                    text = res.text.strip()
+                    if "{" in text:
+                        import json
+                        data = json.loads(text)
+                        ip = data.get("ip") or data.get("origin")
+                        if ip:
+                            server_ip = ip
+                            break
+                    else:
+                        if text:
+                            server_ip = text
+                            break
+            except Exception:
+                continue
     except Exception:
         pass
+
+    if server_ip == "Unknown":
+        server_ip = "Определяется... (нажмите ↻ для обновления)" if lang == "ru" else "Determining... (click ↻ to refresh)"
         
     # --- Columns Setup ---
     autosave_timer = None
@@ -339,11 +363,71 @@ def build_settings_view(page: ft.Page, lang: str):
             col=col_sizes
         )
 
+    ip_text_widget = ft.Text(t("server_ip_notice", lang, ip=server_ip), size=12, color="#38bdf8", weight=ft.FontWeight.BOLD)
+    
+    async def handle_refresh_ip(e):
+        ip_text_widget.value = "Запрос внешнего IP..." if lang == "ru" else "Querying public IP..."
+        ip_box.update()
+        
+        resolved_ip = "Unknown"
+        try:
+            import trading_engine
+            px = trading_engine.get_binance_proxies()
+            proxy_url = px.get("http") if px else None
+            
+            urls = [
+                "https://api.ipify.org?format=json",
+                "https://ipinfo.io/json",
+                "https://ifconfig.me/ip",
+                "https://icanhazip.com"
+            ]
+            
+            for url in urls:
+                try:
+                    if proxy_url:
+                        with httpx.Client(proxy=proxy_url, timeout=3.0) as client:
+                            res = client.get(url)
+                    else:
+                        res = httpx.get(url, timeout=3.0)
+                    if res.status_code == 200:
+                        text = res.text.strip()
+                        if "{" in text:
+                            import json
+                            data = json.loads(text)
+                            ip = data.get("ip") or data.get("origin")
+                            if ip:
+                                resolved_ip = ip
+                                break
+                        else:
+                            if text:
+                                resolved_ip = text
+                                break
+                except Exception:
+                    continue
+        except Exception:
+            pass
+            
+        if resolved_ip == "Unknown":
+            resolved_ip = "Не определен (используйте ваш IP с сайта 2ip.ru)"
+            
+        ip_text_widget.value = t("server_ip_notice", lang, ip=resolved_ip)
+        ip_box.update()
+
     ip_box = ft.Container(
         content=ft.Row(
             [
                 ft.Icon(ft.Icons.INFO_ROUNDED, color="#38bdf8", size=18),
-                ft.Text(t("server_ip_notice", lang, ip=server_ip), size=12, color="#38bdf8", weight=ft.FontWeight.BOLD)
+                ip_text_widget,
+                ft.IconButton(
+                    icon=ft.Icons.REFRESH_ROUNDED,
+                    icon_color="#38bdf8",
+                    icon_size=16,
+                    tooltip="Обновить IP",
+                    on_click=handle_refresh_ip,
+                    padding=0,
+                    width=24,
+                    height=24
+                )
             ],
             spacing=8,
             vertical_alignment=ft.CrossAxisAlignment.CENTER
@@ -835,8 +919,9 @@ def build_settings_view(page: ft.Page, lang: str):
 
     ai_exit_mode_dd = make_dropdown(
         options=[
-            ft.dropdown.Option("REVERSAL_ONLY", "Только разворот тренда" if lang == "ru" else "AI Reversal Only"),
-            ft.dropdown.Option("STAGNATION_AND_REVERSAL", "Разворот + Выход по застою" if lang == "ru" else "Reversal + Stagnation Exit"),
+            ft.dropdown.Option("REVERSAL_ONLY", "Только разворот" if lang == "ru" else "AI Reversal Only"),
+            ft.dropdown.Option("STAGNATION_AND_REVERSAL", "Разворот + Застой" if lang == "ru" else "Reversal + Stagnation"),
+            ft.dropdown.Option("NEURAL_AI_DECISION", "🧠 Сигнал ИИ (Самообучение)" if lang == "ru" else "🧠 AI Neural Decision")
         ],
         value=settings.get("ai_exit_mode", "STAGNATION_AND_REVERSAL"),
         on_change=update_ai_exit_controls_state

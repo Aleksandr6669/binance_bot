@@ -90,6 +90,7 @@ def build_history_view(page: ft.Page, lang: str):
         ("", t("all_statuses", lang)),
         ("CLOSED_TP", t("status_tp", lang)),
         ("CLOSED_SL", t("status_sl", lang)),
+        ("CLOSED_AI", "Закрыто по ИИ" if lang == "ru" else "Closed by AI"),
         ("CLOSED_MANUAL", t("status_manual", lang)),
         ("CANCELED", t("status_canceled", lang))
     ]
@@ -98,7 +99,7 @@ def build_history_view(page: ft.Page, lang: str):
     status_dd = make_dropdown(
         label=None,
         options=[ft.dropdown.Option(k, v) for k, v in status_options],
-        width=125,
+        width=155,
         value=SAVED_HISTORY_FILTERS["status"],
         on_change=run_apply
     )
@@ -135,7 +136,7 @@ def build_history_view(page: ft.Page, lang: str):
     
     pair_field.height = 48
     status_dd.height = 48
-    status_dd.width = 140
+    status_dd.width = 155
     timeframe_dd.height = 48
     mode_dd.height = 48
     mode_dd.width = 135
@@ -314,7 +315,7 @@ def build_history_view(page: ft.Page, lang: str):
             total_pnl_val = sum(
                 float(o["pnl"]) 
                 for o in orders 
-                if o.get("status") in ["CLOSED_TP", "CLOSED_SL", "CLOSED_MANUAL"] 
+                if (o.get("status") in ["CLOSED_TP", "CLOSED_SL", "CLOSED_MANUAL"] or (o.get("status") and str(o.get("status")).startswith("CLOSED_AI"))) 
                 and o.get("pnl") is not None
             )
             total_pnl_text.value = f"{total_pnl_val:+.2f}$"
@@ -332,7 +333,19 @@ def build_history_view(page: ft.Page, lang: str):
                 pnl_val = float(o["pnl"]) if (o["pnl"] is not None and not is_canceled) else 0.0
                 pnl_color = "#94a3b8" if is_canceled else ("#10b981" if pnl_val >= 0 else "#ef4444")
                 pnl_display_str = "$0.00" if is_canceled else f"{pnl_val:+.2f}$"
-                status_bg = "#64748b" if is_canceled else ("#334155" if "MANUAL" in str(o.get("status")) else ("#10b981" if "TP" in str(o.get("status")) else "#ef4444"))
+                
+                # Фиолетово-синий плашка для ордеров, закрытых по ИИ
+                st_str = str(o.get("status", ""))
+                if is_canceled:
+                    status_bg = "#64748b"
+                elif "AI" in st_str:
+                    status_bg = "#8b5cf6"
+                elif "MANUAL" in st_str:
+                    status_bg = "#334155"
+                elif "TP" in st_str:
+                    status_bg = "#10b981"
+                else:
+                    status_bg = "#ef4444"
 
                 # Парсинг 5-7 свечей штампа закрытия (или генерирование вектора движения от входа к выходу)
                 # 100% Высокая отчетливость штампа: нормализация цен 10..90 по высоте
@@ -413,11 +426,15 @@ def build_history_view(page: ft.Page, lang: str):
                     expand=True
                 )
 
+                b_id = str(o.get("binance_order_id")) if o.get("binance_order_id") else None
+                id_label_str = f"#{o.get('id')} • B: {b_id}" if b_id else f"#{o.get('id')}"
+
                 card = ft.Container(
                     content=ft.Row(
                         [
                             # Col 1: Asset Info
                             ft.Column([
+                                ft.Text(id_label_str, size=9, color="#64748b", weight=ft.FontWeight.W_500),
                                 ft.Row([
                                     ft.Text(f"{o['pair']} ({o.get('timeframe') or '—'})", weight=ft.FontWeight.BOLD, size=14, color="#f8fafc"),
                                     ft.Container(
@@ -433,7 +450,7 @@ def build_history_view(page: ft.Page, lang: str):
                                     border_radius=4,
                                     padding=ft.Padding.symmetric(vertical=1, horizontal=4)
                                 )
-                            ], spacing=4, width=140),
+                            ], spacing=2, width=150),
                             
                             # Col 2: Date (ПЕРЕД ЦЕНОЙ ВХОДА)
                             ft.Column([

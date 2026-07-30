@@ -38,22 +38,24 @@ def build_dashboard_view(page: ft.Page, lang: str):
     balance_text = ft.Text("$0.00 USDT", size=24, weight=ft.FontWeight.BOLD, color="#f8fafc")
     collateral_text = ft.Text("$0.00 USDT", size=14, color="#94a3b8")
     pnl_text = ft.Text("$0.00 (0.00%)", size=18, weight=ft.FontWeight.BOLD, color="#10b981")
-    pnl_7d_val_text = ft.Text("$0.00", size=12, weight=ft.FontWeight.BOLD, color="#10b981")
-    pnl_30d_val_text = ft.Text("$0.00", size=12, weight=ft.FontWeight.BOLD, color="#10b981")
+    pnl_7d_val_text = ft.Text("$0.00", size=11, weight=ft.FontWeight.BOLD, color="#10b981")
+    pnl_30d_val_text = ft.Text("$0.00", size=11, weight=ft.FontWeight.BOLD, color="#10b981")
+    pnl_forecast_7d_text = ft.Text("+$0.00", size=11, weight=ft.FontWeight.BOLD, color="#a78bfa")
+    pnl_forecast_30d_text = ft.Text("+$0.00", size=11, weight=ft.FontWeight.BOLD, color="#a78bfa")
     
     equity_chart_series = []
     equity_mini_chart = ftc.LineChart(
         data_series=equity_chart_series,
         border=ft.Border.all(0, ft.Colors.TRANSPARENT),
-        left_axis=ftc.ChartAxis(labels=[]),
-        bottom_axis=ftc.ChartAxis(labels=[]),
-        top_axis=ftc.ChartAxis(labels=[]),
-        right_axis=ftc.ChartAxis(labels=[]),
+        left_axis=None,
+        bottom_axis=None,
+        top_axis=None,
+        right_axis=None,
         horizontal_grid_lines=ftc.ChartGridLines(color=ft.Colors.TRANSPARENT),
         vertical_grid_lines=ftc.ChartGridLines(color=ft.Colors.TRANSPARENT),
         expand=True,
-        height=45,
-        interactive=True
+        height=90,
+        interactive=False
     )
     bot_status_label = ft.Text("Strategy Status", size=16, weight=ft.FontWeight.BOLD, color="#f8fafc")
     bot_status_desc = ft.Text("Stopped", size=14, color="#94a3b8")
@@ -90,20 +92,66 @@ def build_dashboard_view(page: ft.Page, lang: str):
     indicator_bb = ft.Text("Bollinger Bands: N/A", size=14, weight=ft.FontWeight.W_500, color="#f8fafc")
 
     # Active Orders
-    active_orders_column = ft.Column(spacing=10, scroll=ft.ScrollMode.ADAPTIVE)
+    active_orders_column = ft.Column(spacing=10)
     orders_card_title_text = ft.Text(t("active_orders", lang), size=16, weight=ft.FontWeight.BOLD, color="#f8fafc")
     order_history_column = ft.Column(spacing=10, scroll=ft.ScrollMode.ADAPTIVE, height=200)
     logs_history_column = ft.Column(spacing=10, scroll=ft.ScrollMode.ADAPTIVE, height=250)
 
-    # Order Book & Walls components
+    # Order Book & Walls components (Приглушенная матовая полоса соотношения объемов стакана без иконок и без обводки)
     orderbook_bids_col = ft.Column(spacing=4, expand=True)
     orderbook_asks_col = ft.Column(spacing=4, expand=True)
     orderbook_wall_badge = ft.Text("Анализ плотностей стакана...", size=11, color="#38bdf8", weight=ft.FontWeight.W_500)
+    
+    orderbook_ratio_bids = ft.Container(bgcolor=ft.Colors.with_opacity(0.28, "#10b981"), height=16, expand=50)
+    orderbook_ratio_asks = ft.Container(bgcolor=ft.Colors.with_opacity(0.28, "#ef4444"), height=16, expand=50)
+    orderbook_ratio_bids_text = ft.Text("BIDS: 50.0%", size=10, weight=ft.FontWeight.BOLD, color="#34d399")
+    orderbook_ratio_asks_text = ft.Text("ASKS: 50.0%", size=10, weight=ft.FontWeight.BOLD, color="#f87171")
+    
+    orderbook_ratio_bar = ft.Container(
+        content=ft.Stack([
+            ft.Row([orderbook_ratio_bids, orderbook_ratio_asks], spacing=0),
+            ft.Container(
+                content=ft.Row([
+                    orderbook_ratio_bids_text,
+                    ft.Text("|", size=10, color="#64748b"),
+                    orderbook_ratio_asks_text
+                ], alignment=ft.MainAxisAlignment.CENTER, spacing=8),
+                alignment=ft.Alignment(0, 0)
+            )
+        ]),
+        height=16,
+        border_radius=8,
+        clip_behavior=ft.ClipBehavior.HARD_EDGE,
+        bgcolor=ft.Colors.with_opacity(0.08, "#ffffff")
+    )
 
-    # Liquidation Map components
+    # Liquidation Map components (Стеклянная сочная полоса ликвидаций)
     liq_map_shorts_col = ft.Column(spacing=4, expand=True)
     liq_map_longs_col = ft.Column(spacing=4, expand=True)
     liq_map_magnet_badge = ft.Text("Моделирование ликвидности...", size=11, color="#a78bfa", weight=ft.FontWeight.W_500)
+    
+    liq_ratio_shorts = ft.Container(bgcolor=ft.Colors.with_opacity(0.28, "#10b981"), height=16, expand=50)
+    liq_ratio_longs = ft.Container(bgcolor=ft.Colors.with_opacity(0.28, "#ef4444"), height=16, expand=50)
+    liq_ratio_shorts_text = ft.Text("SHORTS: 50.0%", size=10, weight=ft.FontWeight.BOLD, color="#34d399")
+    liq_ratio_longs_text = ft.Text("LONGS: 50.0%", size=10, weight=ft.FontWeight.BOLD, color="#f87171")
+    
+    liq_ratio_bar = ft.Container(
+        content=ft.Stack([
+            ft.Row([liq_ratio_shorts, liq_ratio_longs], spacing=0),
+            ft.Container(
+                content=ft.Row([
+                    liq_ratio_shorts_text,
+                    ft.Text("|", size=10, color="#64748b"),
+                    liq_ratio_longs_text
+                ], alignment=ft.MainAxisAlignment.CENTER, spacing=8),
+                alignment=ft.Alignment(0, 0)
+            )
+        ]),
+        height=16,
+        border_radius=8,
+        clip_behavior=ft.ClipBehavior.HARD_EDGE,
+        bgcolor=ft.Colors.with_opacity(0.08, "#ffffff")
+    )
 
     # ML Logs
     ml_strategy_title = ft.Text(t_ai_strat, size=15, weight=ft.FontWeight.BOLD, color="#f8fafc", expand=True)
@@ -162,8 +210,10 @@ def build_dashboard_view(page: ft.Page, lang: str):
         active_orders = []
         current_price = 0.0
         try:
-            active_orders = await asyncio.to_thread(db.get_active_orders)
-            current_price = await asyncio.to_thread(trading_engine.fetch_current_price, pair, market_type)
+            active_orders, current_price = await asyncio.gather(
+                asyncio.to_thread(db.get_active_orders),
+                asyncio.to_thread(trading_engine.fetch_current_price, pair, market_type)
+            )
             indicator_price.value = f"Price: {current_price:,.2f}"
         except Exception as e:
             if is_destroyed_session_error(e):
@@ -174,7 +224,7 @@ def build_dashboard_view(page: ft.Page, lang: str):
         live_positions_map = {}
         if is_live:
             try:
-                live_pos_list = await asyncio.to_thread(trading_engine.fetch_binance_positions, market_type)
+                live_pos_list = await asyncio.to_thread(trading_engine.fetch_live_positions, market_type)
                 if live_pos_list:
                     for lp in live_pos_list:
                         if lp.get("pair"):
@@ -225,6 +275,8 @@ def build_dashboard_view(page: ft.Page, lang: str):
                 display_bal = balance_val + unrealized_pnl
                 balance_text.value = f"${display_bal:,.2f} USDT"
                 collateral_text.value = "Live Account Equity (Binance)"
+                if balance_val > 0:
+                    db.save_daily_balance("LIVE", display_bal)
             else:
                 balance_card_title.value = t("demo_balance", lang)
                 raw_demo = settings.get("demo_balance")
@@ -248,7 +300,7 @@ def build_dashboard_view(page: ft.Page, lang: str):
         pnl_text.value = f"${total_pnl:+.2f} ({pnl_pct:+.2f}%)"
         pnl_text.color = "#10b981" if total_pnl >= 0 else "#ef4444"
 
-        # Загрузка точной статистики PnL за 7 дней и за 30 дней
+        # Загрузка точной статистики PnL за 7 дней, 30 дней и расчёт Прогнозов ИИ (7D и 30D)
         try:
             pnl_stats = db.get_pnl_stats(trading_mode="LIVE" if is_live else "DEMO")
             p7d = pnl_stats["pnl_7d"]
@@ -259,25 +311,59 @@ def build_dashboard_view(page: ft.Page, lang: str):
 
             pnl_30d_val_text.value = f"${p30d:+.2f}"
             pnl_30d_val_text.color = "#10b981" if p30d >= 0 else "#ef4444"
+
+            # Прогнозы ИИ по математическому ожиданию торгового автомата
+            eq_hist = db.get_daily_equity_history(trading_mode="LIVE" if is_live else "DEMO", days=30)
+            days_c = max(1, len(eq_hist))
+            avg_daily_pnl = p30d / days_c if p30d != 0 else (p7d / max(1, min(7, days_c)))
+
+            forecast_7d = avg_daily_pnl * 7.0 * (1.1 if avg_daily_pnl >= 0 else 0.9)
+            forecast_30d = avg_daily_pnl * 30.0 * (1.15 if avg_daily_pnl >= 0 else 0.85)
+
+            pnl_forecast_7d_text.value = f"${forecast_7d:+.2f}"
+            pnl_forecast_7d_text.color = "#10b981" if forecast_7d >= 0 else "#ef4444"
+
+            pnl_forecast_30d_text.value = f"${forecast_30d:+.2f}"
+            pnl_forecast_30d_text.color = "#10b981" if forecast_30d >= 0 else "#ef4444"
         except Exception as ex_pnl_st:
             print(f"Error updating PnL stats widgets: {ex_pnl_st}")
 
-        # Обновление мини-графика динамики эквити/депозита по дням
+        # Обновление суточного графика эквити по дням (1 день = 1 пик) до самого правого края (до последней сделки сегодня)
         try:
-            eq_hist = db.get_daily_equity_history(trading_mode="LIVE" if is_live else "DEMO")
+            eq_hist = db.get_daily_equity_history(trading_mode="LIVE" if is_live else "DEMO", days=30)
             if eq_hist:
+                # 1 день = 1 пик (начиная от стартовой точки 0 перед первой сделкой)
                 eq_pts = [ftc.LineChartDataPoint(0, 0.0)]
                 for item in eq_hist:
-                    eq_pts.append(ftc.LineChartDataPoint(item["idx"] + 1, item["cum_pnl"]))
+                    eq_pts.append(ftc.LineChartDataPoint(item["idx"] + 1, float(item["cum_pnl"])))
                 
-                last_cum = eq_hist[-1]["cum_pnl"]
+                # Точка сегодняшнего дня: включает суточный результат до последней исполненной сделки + живой плавающий PnL
+                if active_positions and unrealized_pnl != 0.0:
+                    last_val = eq_pts[-1].y
+                    eq_pts[-1] = ftc.LineChartDataPoint(len(eq_pts) - 1, float(last_val + unrealized_pnl))
+
+                all_y = [p.y for p in eq_pts]
+                min_y = min(all_y)
+                max_y = max(all_y)
+                span_y = max_y - min_y
+                if span_y < 0.1:
+                    span_y = 1.0
+
+                # max_x = len(eq_pts) - 1 гарантирует, что график растянут 100% ДО САМОГО ПРАВОГО КРАЯ (1 день = 1 пик)!
+                equity_mini_chart.min_x = 0
+                equity_mini_chart.max_x = len(eq_pts) - 1
+                equity_mini_chart.min_y = min_y - span_y * 0.12
+                equity_mini_chart.max_y = max_y + span_y * 0.12
+
+                last_cum = eq_pts[-1].y
                 line_color = "#10b981" if last_cum >= 0 else "#ef4444"
-                fill_color = ft.Colors.with_opacity(0.12, line_color)
+                fill_color = ft.Colors.with_opacity(0.14, line_color)
                 
                 equity_mini_chart.data_series = [
+                    # Единственная чистая волнистая линия суточного факта (1 день = 1 пик) без фиолетовой линии прогноза
                     ftc.LineChartData(
                         points=eq_pts,
-                        stroke_width=2.5,
+                        stroke_width=2.8,
                         color=line_color,
                         curved=True,
                         below_line_bgcolor=fill_color
@@ -285,7 +371,7 @@ def build_dashboard_view(page: ft.Page, lang: str):
                 ]
                 equity_mini_chart.update()
         except Exception as ex_eq:
-            pass
+            print(f"Error updating daily equity mini chart: {ex_eq}")
     
         # 4. Отрисовка списка активных ордеров с плавными анимациями
         try:
@@ -313,14 +399,24 @@ def build_dashboard_view(page: ft.Page, lang: str):
 
             # Убираем надпись "Нет активных ордеров", если появились ордера
             if active_orders:
-                # Если в списке была заглушка-текст, очищаем ее
-                if len(active_orders_column.controls) == 1 and isinstance(active_orders_column.controls[0], ft.Text):
-                    active_orders_column.controls.clear()
+                # Очищаем только заглушку по метке data="no_orders_placeholder"
+                active_orders_column.controls = [
+                    ctrl for ctrl in active_orders_column.controls 
+                    if getattr(ctrl, "data", None) != "no_orders_placeholder"
+                ]
             else:
                 if not rendered_orders:
                     active_orders_column.controls.clear()
                     active_orders_column.controls.append(
-                        ft.Text(t("no_active_orders", get_lang(page)), color="#94a3b8", italic=True)
+                        ft.Container(
+                            content=ft.Text(t("no_active_orders", get_lang(page)), color="#94a3b8", italic=True, size=13),
+                            alignment=ft.Alignment(0, 0),
+                            height=85,
+                            border_radius=10,
+                            bgcolor=ft.Colors.with_opacity(0.03, "#ffffff"),
+                            border=ft.Border.all(1, ft.Colors.with_opacity(0.05, "#ffffff")),
+                            data="no_orders_placeholder"
+                        )
                     )
 
             # Добавление новых ордеров и обновление существующих
@@ -337,19 +433,26 @@ def build_dashboard_view(page: ft.Page, lang: str):
                 p_sym = o.get("pair", pair).upper()
                 if order_status == "ACTIVE":
                     if is_live and p_sym in live_positions_map:
-                        # 🎯 Берём точный живой Unrealized PnL напрямую с Binance API
+                        # 🎯 Берём точный живой Unrealized PnL и цену входа напрямую с Binance API
                         unrealized = float(live_positions_map[p_sym].get("unrealized_pnl", 0.0))
+                        b_entry = float(live_positions_map[p_sym].get("entry_price", 0.0))
+                        if b_entry > 0:
+                            entry = b_entry
                     elif current_price > 0:
                         if side == "BUY":
                             unrealized = amount * (current_price - entry)
                         else:
                             unrealized = amount * (entry - current_price)
 
-                stake_val = float(o.get("size_usdt") or (entry * amount))
+                lev_val = float(o.get("leverage") or 1)
+                notional_val = entry * amount if (entry > 0 and amount > 0) else float(o.get("size_usdt") or 0.0)
+                margin_stake = (notional_val / lev_val) if (lev_val > 0 and notional_val > 0) else float(o.get("size_usdt") or 0.0)
+                if margin_stake <= 0:
+                    margin_stake = float(o.get("size_usdt") or 5.0)
 
                 is_active = (order_status == "ACTIVE")
                 if is_active:
-                    live_roi = (unrealized / stake_val * 100.0) if stake_val > 0 else 0.0
+                    live_roi = (unrealized / margin_stake * 100.0) if margin_stake > 0 else 0.0
                     pnl_display_str = f"${unrealized:+.2f} ({live_roi:+.1f}%)"
                     pnl_color = "#10b981" if unrealized >= 0 else "#ef4444"
                 else:
@@ -414,12 +517,16 @@ def build_dashboard_view(page: ft.Page, lang: str):
                 if order_id in rendered_orders:
                     # Обновляем тексты и выразительную кривую волн ордера
                     info = rendered_orders[order_id]
+                    if "entry_text" in info:
+                        info["entry_text"].value = f"${entry:.2f}"
                     info["price_text"].value = f"${current_price:.2f}"
                     info["pnl_text"].value = pnl_display_str
                     info["pnl_text"].color = pnl_color
                     info["sl_text"].value = sl_str
                     info["sl_text"].color = sl_color
                     info["tp_text"].value = tp_str
+                    if "stake_text" in info:
+                        info["stake_text"].value = f"${margin_stake:.2f}"
                     
                     if "mini_chart" in info and chart_pts:
                         info["mini_chart"].min_x = 0
@@ -437,9 +544,11 @@ def build_dashboard_view(page: ft.Page, lang: str):
                         ]
                 else:
                     # Создаем виджеты и волнистый график с точным min_x=0/max_x=max_x_val и min_y=min_y_val/max_y=max_y_val
+                    entry_text = ft.Text(f"${entry:.2f}", size=12, color="#f8fafc")
                     price_text = ft.Text(f"${current_price:.2f}", size=11, color="#94a3b8")
                     sl_text = ft.Text(sl_str, size=11, color=sl_color)
                     tp_text = ft.Text(tp_str, size=11, color="#10b981")
+                    stake_text = ft.Text(f"${margin_stake:.2f}", size=12, color="#f8fafc")
 
                     order_pnl_text = ft.Text(pnl_display_str, weight=ft.FontWeight.BOLD, color=pnl_color, size=13)
                     
@@ -477,11 +586,15 @@ def build_dashboard_view(page: ft.Page, lang: str):
                             ).start()
                         return handler
 
+                    b_id = str(o.get("binance_order_id")) if o.get("binance_order_id") else None
+                    id_label_str = f"#{order_id} • B: {b_id}" if b_id else f"#{order_id}"
+
                     order_row = ft.Container(
                         content=ft.Row(
                             [
                                 # Col 1: Asset Info
                                 ft.Column([
+                                    ft.Text(id_label_str, size=9, color="#64748b", weight=ft.FontWeight.W_500),
                                     ft.Row([
                                         ft.Text(f"{o['pair']} ({order_tf})", weight=ft.FontWeight.BOLD, size=14, color="#f8fafc"),
                                         ft.Container(
@@ -497,19 +610,19 @@ def build_dashboard_view(page: ft.Page, lang: str):
                                         border_radius=4,
                                         padding=ft.Padding.symmetric(vertical=1, horizontal=4)
                                     )
-                                ], spacing=4, width=145),
+                                ], spacing=2, width=155),
                                 
                                 # Col 2: Entry / Current
                                 ft.Column([
                                     ft.Text("ENTRY / CURRENT", size=9, color="#94a3b8", weight=ft.FontWeight.BOLD),
-                                    ft.Text(f"${entry:.2f}", size=12, color="#f8fafc"),
+                                    entry_text,
                                     price_text
                                 ], spacing=2, width=105),
                                 
                                 # Col 3: Stake details (ПЕРЕД СТОПАМИ)
                                 ft.Column([
                                     ft.Text("STAKE", size=9, color="#94a3b8", weight=ft.FontWeight.BOLD),
-                                    ft.Text(f"${float(o['size_usdt']):.2f}", size=12, color="#f8fafc"),
+                                    stake_text,
                                     ft.Text(f"Lev: {o['leverage']}x" if o.get('leverage') else "Spot", size=11, color="#94a3b8")
                                 ], spacing=2, width=80),
 
@@ -568,10 +681,12 @@ def build_dashboard_view(page: ft.Page, lang: str):
                     active_orders_column.controls.append(order_row)
                     rendered_orders[order_id] = {
                         "control": order_row,
+                        "entry_text": entry_text,
                         "price_text": price_text,
                         "pnl_text": order_pnl_text,
                         "sl_text": sl_text,
                         "tp_text": tp_text,
+                        "stake_text": stake_text,
                         "mini_chart": order_mini_chart
                     }
                     new_controls_added = True
@@ -697,6 +812,22 @@ def build_dashboard_view(page: ft.Page, lang: str):
             max_bid_v = ob_data.get("max_bid_vol", 1.0)
             max_ask_v = ob_data.get("max_ask_vol", 1.0)
 
+            sum_bids_v = sum([v for _, v in bids]) if bids else 0.0
+            sum_asks_v = sum([v for _, v in asks]) if asks else 0.0
+            grand_v = sum_bids_v + sum_asks_v
+
+            if grand_v > 0:
+                pct_bids = (sum_bids_v / grand_v) * 100.0
+                pct_asks = 100.0 - pct_bids
+            else:
+                pct_bids = 50.0
+                pct_asks = 50.0
+
+            orderbook_ratio_bids.expand = int(max(1, pct_bids))
+            orderbook_ratio_asks.expand = int(max(1, pct_asks))
+            orderbook_ratio_bids_text.value = f"BIDS: {pct_bids:.1f}%"
+            orderbook_ratio_asks_text.value = f"ASKS: {pct_asks:.1f}%"
+
             top_bid_v = max([v for _, v in bids], default=1.0)
             top_ask_v = max([v for _, v in asks], default=1.0)
             max_bid_tuple = max(bids, key=lambda x: x[1]) if bids else (0.0, 0.0)
@@ -707,19 +838,28 @@ def build_dashboard_view(page: ft.Page, lang: str):
                 is_w = (p_val == max_bid_tuple[0] and v_val == max_bid_tuple[1] and v_val > 0)
                 fill_ratio = float(min(1.0, max(0.05, v_val / (top_bid_v + 1e-9))))
                 w_tag = " 🏆 СТЕНКА" if is_w else ""
-                # Чем больше объем, тем более насыщенный зеленый фон плашки
-                bg_op = 0.38 if is_w else (0.05 + 0.22 * fill_ratio)
+                bg_op = 0.38 if is_w else (0.08 + 0.25 * fill_ratio)
+                fill_int = int(fill_ratio * 100)
+                empty_int = int(100 - fill_int)
                 
                 bid_rows.append(
                     ft.Container(
-                        content=ft.Row([
-                            ft.Text(f"${p_val:,.2f}{w_tag}", size=11, weight=ft.FontWeight.BOLD if is_w else ft.FontWeight.NORMAL, color="#34d399"),
-                            ft.Text(f"{v_val:.3f}", size=11, color="#e2e8f0", weight=ft.FontWeight.BOLD if is_w else ft.FontWeight.NORMAL)
-                        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-                        bgcolor=ft.Colors.with_opacity(bg_op, "#10b981"),
-                        border=ft.Border.all(2, "#34d399") if is_w else ft.Border.all(1, ft.Colors.with_opacity(0.08, "#10b981")),
-                        padding=ft.Padding(8, 5, 8, 5),
-                        border_radius=6
+                        content=ft.Stack([
+                            ft.Row([
+                                ft.Container(bgcolor=ft.Colors.with_opacity(bg_op, "#10b981"), expand=max(1, fill_int)),
+                                ft.Container(bgcolor=ft.Colors.TRANSPARENT, expand=max(1, empty_int))
+                            ], height=24, spacing=0),
+                            ft.Container(
+                                content=ft.Row([
+                                    ft.Text(f"${p_val:,.2f}{w_tag}", size=11, weight=ft.FontWeight.BOLD if is_w else ft.FontWeight.NORMAL, color="#34d399"),
+                                    ft.Text(f"{v_val:.3f}", size=11, color="#e2e8f0", weight=ft.FontWeight.BOLD if is_w else ft.FontWeight.NORMAL)
+                                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                                padding=ft.Padding(8, 4, 8, 4)
+                            )
+                        ]),
+                        border=ft.Border.all(2, "#34d399") if is_w else ft.Border.all(1, ft.Colors.with_opacity(0.12, "#10b981")),
+                        border_radius=6,
+                        clip_behavior=ft.ClipBehavior.HARD_EDGE
                     )
                 )
             orderbook_bids_col.controls = bid_rows
@@ -729,18 +869,28 @@ def build_dashboard_view(page: ft.Page, lang: str):
                 is_w = (p_val == max_ask_tuple[0] and v_val == max_ask_tuple[1] and v_val > 0)
                 fill_ratio = float(min(1.0, max(0.05, v_val / (top_ask_v + 1e-9))))
                 w_tag = " 🏆 СТЕНКА" if is_w else ""
-                bg_op = 0.38 if is_w else (0.05 + 0.22 * fill_ratio)
+                bg_op = 0.38 if is_w else (0.08 + 0.25 * fill_ratio)
+                fill_int = int(fill_ratio * 100)
+                empty_int = int(100 - fill_int)
                 
                 ask_rows.append(
                     ft.Container(
-                        content=ft.Row([
-                            ft.Text(f"${p_val:,.2f}{w_tag}", size=11, weight=ft.FontWeight.BOLD if is_w else ft.FontWeight.NORMAL, color="#f87171"),
-                            ft.Text(f"{v_val:.3f}", size=11, color="#e2e8f0", weight=ft.FontWeight.BOLD if is_w else ft.FontWeight.NORMAL)
-                        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-                        bgcolor=ft.Colors.with_opacity(bg_op, "#ef4444"),
-                        border=ft.Border.all(2, "#f87171") if is_w else ft.Border.all(1, ft.Colors.with_opacity(0.08, "#ef4444")),
-                        padding=ft.Padding(8, 5, 8, 5),
-                        border_radius=6
+                        content=ft.Stack([
+                            ft.Row([
+                                ft.Container(bgcolor=ft.Colors.with_opacity(bg_op, "#ef4444"), expand=max(1, fill_int)),
+                                ft.Container(bgcolor=ft.Colors.TRANSPARENT, expand=max(1, empty_int))
+                            ], height=24, spacing=0),
+                            ft.Container(
+                                content=ft.Row([
+                                    ft.Text(f"${p_val:,.2f}{w_tag}", size=11, weight=ft.FontWeight.BOLD if is_w else ft.FontWeight.NORMAL, color="#f87171"),
+                                    ft.Text(f"{v_val:.3f}", size=11, color="#e2e8f0", weight=ft.FontWeight.BOLD if is_w else ft.FontWeight.NORMAL)
+                                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                                padding=ft.Padding(8, 4, 8, 4)
+                            )
+                        ]),
+                        border=ft.Border.all(2, "#f87171") if is_w else ft.Border.all(1, ft.Colors.with_opacity(0.12, "#ef4444")),
+                        border_radius=6,
+                        clip_behavior=ft.ClipBehavior.HARD_EDGE
                     )
                 )
             orderbook_asks_col.controls = ask_rows
@@ -759,6 +909,22 @@ def build_dashboard_view(page: ft.Page, lang: str):
             max_l_price = liq_data.get("max_long_price", 0.0)
             max_l_vol = liq_data.get("max_long_vol", 1.0)
 
+            tot_s_vol = sum([v for _, v, _ in shorts]) if shorts else 0.0
+            tot_l_vol = sum([v for _, v, _ in longs]) if longs else 0.0
+            tot_liq_vol = tot_s_vol + tot_l_vol
+
+            if tot_liq_vol > 0:
+                pct_shorts = (tot_s_vol / tot_liq_vol) * 100.0
+                pct_longs = 100.0 - pct_shorts
+            else:
+                pct_shorts = 50.0
+                pct_longs = 50.0
+
+            liq_ratio_shorts.expand = int(max(1, pct_shorts))
+            liq_ratio_longs.expand = int(max(1, pct_longs))
+            liq_ratio_shorts_text.value = f"SHORTS: {pct_shorts:.1f}%"
+            liq_ratio_longs_text.value = f"LONGS: {pct_longs:.1f}%"
+
             top_short_v = max([v for _, v, _ in shorts], default=1.0)
             top_long_v = max([v for _, v, _ in longs], default=1.0)
 
@@ -767,18 +933,28 @@ def build_dashboard_view(page: ft.Page, lang: str):
                 is_m = (p_val == max_s_price)
                 fill_ratio = float(min(1.0, max(0.05, v_val / (top_short_v + 1e-9))))
                 m_tag = f" 🎯 [{lev_tag}]" if is_m else f" [{lev_tag}]"
-                bg_op = 0.35 if is_m else (0.05 + 0.22 * fill_ratio)
+                bg_op = 0.38 if is_m else (0.08 + 0.25 * fill_ratio)
+                fill_int = int(fill_ratio * 100)
+                empty_int = int(100 - fill_int)
                 
                 s_rows.append(
                     ft.Container(
-                        content=ft.Row([
-                            ft.Text(f"${p_val:,.2f}{m_tag}", size=11, weight=ft.FontWeight.BOLD if is_m else ft.FontWeight.NORMAL, color="#34d399"),
-                            ft.Text(f"${v_val:,.0f}", size=11, color="#e2e8f0", weight=ft.FontWeight.BOLD if is_m else ft.FontWeight.NORMAL)
-                        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-                        bgcolor=ft.Colors.with_opacity(bg_op, "#10b981"),
-                        border=ft.Border.all(1.5, "#10b981") if is_m else ft.Border.all(1, ft.Colors.with_opacity(0.08, "#10b981")),
-                        padding=ft.Padding(8, 5, 8, 5),
-                        border_radius=6
+                        content=ft.Stack([
+                            ft.Row([
+                                ft.Container(bgcolor=ft.Colors.with_opacity(bg_op, "#10b981"), expand=max(1, fill_int)),
+                                ft.Container(bgcolor=ft.Colors.TRANSPARENT, expand=max(1, empty_int))
+                            ], height=24, spacing=0),
+                            ft.Container(
+                                content=ft.Row([
+                                    ft.Text(f"${p_val:,.2f}{m_tag}", size=11, weight=ft.FontWeight.BOLD if is_m else ft.FontWeight.NORMAL, color="#34d399"),
+                                    ft.Text(f"${v_val:,.0f}", size=11, color="#e2e8f0", weight=ft.FontWeight.BOLD if is_m else ft.FontWeight.NORMAL)
+                                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                                padding=ft.Padding(8, 4, 8, 4)
+                            )
+                        ]),
+                        border=ft.Border.all(2, "#34d399") if is_m else ft.Border.all(1, ft.Colors.with_opacity(0.12, "#10b981")),
+                        border_radius=6,
+                        clip_behavior=ft.ClipBehavior.HARD_EDGE
                     )
                 )
             liq_map_shorts_col.controls = s_rows
@@ -788,18 +964,28 @@ def build_dashboard_view(page: ft.Page, lang: str):
                 is_m = (p_val == max_l_price)
                 fill_ratio = float(min(1.0, max(0.05, v_val / (top_long_v + 1e-9))))
                 m_tag = f" 🎯 [{lev_tag}]" if is_m else f" [{lev_tag}]"
-                bg_op = 0.35 if is_m else (0.05 + 0.22 * fill_ratio)
+                bg_op = 0.38 if is_m else (0.08 + 0.25 * fill_ratio)
+                fill_int = int(fill_ratio * 100)
+                empty_int = int(100 - fill_int)
                 
                 l_rows.append(
                     ft.Container(
-                        content=ft.Row([
-                            ft.Text(f"${p_val:,.2f}{m_tag}", size=11, weight=ft.FontWeight.BOLD if is_m else ft.FontWeight.NORMAL, color="#f87171"),
-                            ft.Text(f"${v_val:,.0f}", size=11, color="#e2e8f0", weight=ft.FontWeight.BOLD if is_m else ft.FontWeight.NORMAL)
-                        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-                        bgcolor=ft.Colors.with_opacity(bg_op, "#ef4444"),
-                        border=ft.Border.all(1.5, "#ef4444") if is_m else ft.Border.all(1, ft.Colors.with_opacity(0.08, "#ef4444")),
-                        padding=ft.Padding(8, 5, 8, 5),
-                        border_radius=6
+                        content=ft.Stack([
+                            ft.Row([
+                                ft.Container(bgcolor=ft.Colors.with_opacity(bg_op, "#ef4444"), expand=max(1, fill_int)),
+                                ft.Container(bgcolor=ft.Colors.TRANSPARENT, expand=max(1, empty_int))
+                            ], height=24, spacing=0),
+                            ft.Container(
+                                content=ft.Row([
+                                    ft.Text(f"${p_val:,.2f}{m_tag}", size=11, weight=ft.FontWeight.BOLD if is_m else ft.FontWeight.NORMAL, color="#f87171"),
+                                    ft.Text(f"${v_val:,.0f}", size=11, color="#e2e8f0", weight=ft.FontWeight.BOLD if is_m else ft.FontWeight.NORMAL)
+                                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                                padding=ft.Padding(8, 4, 8, 4)
+                            )
+                        ]),
+                        border=ft.Border.all(2, "#f87171") if is_m else ft.Border.all(1, ft.Colors.with_opacity(0.12, "#ef4444")),
+                        border_radius=6,
+                        clip_behavior=ft.ClipBehavior.HARD_EDGE
                     )
                 )
             liq_map_longs_col.controls = l_rows
@@ -1170,11 +1356,34 @@ def build_dashboard_view(page: ft.Page, lang: str):
                     price_str = f"{current_p:,.2f}"
                 else:
                     price_str = f"{current_p:,.0f}" if step_y == int(step_y) else f"{current_p:,.2f}"
+
+                # Формируем информационную плашку предупреждения о бана при активном Circuit Breaker
+                ban_info = trading_engine.get_binance_ban_status()
+                ban_wrapper_content = ft.Container()
+                if ban_info.get("is_banned"):
+                    ban_text_str = f"⚠️ LIVE-торговля на паузе (Ограничение IP Binance до {ban_info['end_time']})" if lang == "ru" else f"⚠️ LIVE Trading Paused (Binance IP limit until {ban_info['end_time']})"
+                    ban_wrapper_content = ft.Container(
+                        content=ft.Row([
+                            ft.Icon(ft.Icons.WARNING_ROUNDED, color="#f59e0b", size=14),
+                            ft.Text(ban_text_str, color="#fcd34d", size=11, weight=ft.FontWeight.BOLD)
+                        ], spacing=6, alignment=ft.MainAxisAlignment.CENTER),
+                        bgcolor=ft.Colors.with_opacity(0.85, "#1e1b4b"),
+                        padding=ft.Padding.symmetric(horizontal=12, vertical=4),
+                        border_radius=8,
+                        border=ft.Border.all(1, "#f59e0b")
+                    )
+
+                ban_wrapper = ft.Container(
+                    content=ban_wrapper_content,
+                    alignment=ft.alignment.Alignment(0, -1.0),
+                    top=8, left=0, right=0
+                )
+
                 if not isinstance(chart_container.content, ft.Stack):
                     price_tag = ft.Container(
                         content=ft.Text(price_str, color="#ffffff", weight=ft.FontWeight.BOLD, size=11),
                         bgcolor=tag_bg,
-                        padding=ft.padding.Padding(left=6, top=3, right=6, bottom=3),
+                        padding=ft.Padding(left=6, top=3, right=6, bottom=3),
                         border_radius=4,
                     )
                     price_tag_wrapper = ft.Container(
@@ -1185,7 +1394,8 @@ def build_dashboard_view(page: ft.Page, lang: str):
                     chart_container.content = ft.Stack(
                         controls=[
                             price_chart,
-                            price_tag_wrapper
+                            price_tag_wrapper,
+                            ban_wrapper
                         ],
                         expand=True
                     )
@@ -1195,12 +1405,26 @@ def build_dashboard_view(page: ft.Page, lang: str):
                     tag = tag_wrapper.content
                     tag.bgcolor = tag_bg
                     tag.content.value = price_str
+                    if len(chart_container.content.controls) > 2:
+                        chart_container.content.controls[2] = ban_wrapper
+                    else:
+                        chart_container.content.controls.append(ban_wrapper)
+
+                try:
+                    if price_chart.page is not None:
+                        price_chart.update()
+                    if chart_container.page is not None:
+                        chart_container.update()
+                except Exception:
+                    pass
             else:
                 chart_container.content = ft.Text("Ошибка получения свечей с Binance", color="#ef4444", size=14)
         except Exception as e:
             if is_destroyed_session_error(e):
                 raise e
-            chart_container.content = ft.Text(f"Ошибка загрузки графика: {str(e)}", color="#ef4444", size=12)
+            err_str = str(e)
+            if "must be added to the page first" not in err_str:
+                chart_container.content = ft.Text(f"Ошибка загрузки графика: {err_str}", color="#ef4444", size=12)
 
         try:
             page.update()
@@ -1221,7 +1445,7 @@ def build_dashboard_view(page: ft.Page, lang: str):
             print(f"Initial dashboard fetch error: {e}")
 
         while True:
-            await asyncio.sleep(0.4)
+            await asyncio.sleep(1.0) # Аккуратный опрос раз в 1 секунду
 
             # Пропускаем если не на дашборде, но не выходим
             if page.route != "/dashboard":
@@ -1235,6 +1459,22 @@ def build_dashboard_view(page: ft.Page, lang: str):
                 else:
                     print(f"Dashboard refresh error: {e}")
     
+    async def fast_ui_clock_ticker():
+        import datetime
+        while True:
+            await asyncio.sleep(0.5)
+            if page.route != "/dashboard":
+                continue
+            try:
+                now_dt = datetime.datetime.now()
+                ai_live_clock_text.value = f"{now_dt.strftime('%H:%M:%S')} (UTC+3)"
+                if ai_live_clock_text.page is not None:
+                    ai_live_clock_text.update()
+            except Exception as e:
+                if is_destroyed_session_error(e):
+                    break
+
+    page.run_task(fast_ui_clock_ticker)
     page.run_task(dashboard_refresher)
 
 
@@ -1407,17 +1647,34 @@ def build_dashboard_view(page: ft.Page, lang: str):
             height=height
         )
 
-    # Статистика PnL за 7 и 30 дней (чистый вертикальный текст по правому краю)
-    stats_column = ft.Column([
-        ft.Row([
-            ft.Text("ПРИБЫЛЬ 7Д:", size=10, color="#94a3b8", weight=ft.FontWeight.BOLD),
-            pnl_7d_val_text
-        ], spacing=6, alignment=ft.MainAxisAlignment.END),
-        ft.Row([
-            ft.Text("ПРИБЫЛЬ 30Д:", size=10, color="#94a3b8", weight=ft.FontWeight.BOLD),
-            pnl_30d_val_text
-        ], spacing=6, alignment=ft.MainAxisAlignment.END)
-    ], spacing=4, alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.END)
+    # Статистика PnL (ФАКТ 7Д/30Д слева + ИИ ПРОГНОЗ 7Д/30Д сбоку справа!)
+    stats_column = ft.Row([
+        # Блок ФАКТ
+        ft.Column([
+            ft.Row([
+                ft.Text("7Д:", size=10, color="#94a3b8", weight=ft.FontWeight.BOLD),
+                pnl_7d_val_text
+            ], spacing=4, alignment=ft.MainAxisAlignment.END),
+            ft.Row([
+                ft.Text("30Д:", size=10, color="#94a3b8", weight=ft.FontWeight.BOLD),
+                pnl_30d_val_text
+            ], spacing=4, alignment=ft.MainAxisAlignment.END)
+        ], spacing=2, alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.END),
+        
+        ft.Container(width=1, height=22, bgcolor=ft.Colors.with_opacity(0.18, "#ffffff")),
+        
+        # Блок ИИ ПРОГНОЗ (СБОКУ!)
+        ft.Column([
+            ft.Row([
+                ft.Text("ПРОГНОЗ 7Д:", size=10, color="#a78bfa", weight=ft.FontWeight.BOLD),
+                pnl_forecast_7d_text
+            ], spacing=4, alignment=ft.MainAxisAlignment.END),
+            ft.Row([
+                ft.Text("ПРОГНОЗ 30Д:", size=10, color="#a78bfa", weight=ft.FontWeight.BOLD),
+                pnl_forecast_30d_text
+            ], spacing=4, alignment=ft.MainAxisAlignment.END)
+        ], spacing=2, alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.END)
+    ], spacing=8, alignment=ft.MainAxisAlignment.END, vertical_alignment=ft.CrossAxisAlignment.CENTER)
 
     # Карта баланса с мини-графиком кривой депозита по дням
     balance_card = make_glass_card(
@@ -1848,6 +2105,7 @@ def build_dashboard_view(page: ft.Page, lang: str):
                 ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER),
                 ft.Divider(height=1, color=ft.Colors.with_opacity(0.08, "#ffffff")),
                 orderbook_wall_badge,
+                orderbook_ratio_bar,
                 ft.ResponsiveRow([
                     ft.Column([
                         ft.Text("🟢 BIDS (ПОКУПКА)", size=11, weight=ft.FontWeight.BOLD, color="#10b981"),
@@ -1878,6 +2136,7 @@ def build_dashboard_view(page: ft.Page, lang: str):
                 ], spacing=12, vertical_alignment=ft.CrossAxisAlignment.CENTER),
                 ft.Divider(height=1, color=ft.Colors.with_opacity(0.08, "#ffffff")),
                 liq_map_magnet_badge,
+                liq_ratio_bar,
                 ft.ResponsiveRow([
                     ft.Column([
                         ft.Text("🟢 SHORT LIQUIDATIONS (ВЫШЕ ЦЕНЫ)", size=11, weight=ft.FontWeight.BOLD, color="#10b981"),
@@ -1901,8 +2160,8 @@ def build_dashboard_view(page: ft.Page, lang: str):
             chart_card,
             indicators_card,
             orders_card,
-            orderbook_card,
-            liquidation_map_card
+            liquidation_map_card,
+            orderbook_card
         ],
         spacing=16
     )

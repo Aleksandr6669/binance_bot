@@ -398,16 +398,34 @@ def get_training_status():
 def predict_ai_trailing_distance(features):
     """
     Предсказывает волатильность (в процентах от цены) для настройки трейлинг-стопа.
-    features: np.array (1D с 9 признаками или 2D [1, 9])
+    features: np.array (1D или 2D с признаками)
     """
     global ai_trailing_model
-    return float(ai_trailing_model.predict(features))
+    if ai_trailing_model is None:
+        return 0.002
+    try:
+        feats = np.array(features).flatten()
+        n_expected = getattr(ai_trailing_model, "n_features_in_", 12)
+        if hasattr(ai_trailing_model, "weights") and hasattr(ai_trailing_model.weights, "shape"):
+            if len(ai_trailing_model.weights.shape) > 0 and ai_trailing_model.weights.shape[0] > 0:
+                n_expected = ai_trailing_model.weights.shape[0]
 
-def evaluate_ai_exit_neural_decision(active_order, current_close, features):
+        if len(feats) < n_expected:
+            feats = np.pad(feats, (0, n_expected - len(feats)), 'constant')
+        else:
+            feats = feats[:n_expected]
+            
+        res = ai_trailing_model.predict(feats.reshape(1, -1))
+        if isinstance(res, (list, np.ndarray)):
+            return float(res[0])
+        return float(res)
+    except Exception as ex:
+        return 0.002
+
+def evaluate_ai_exit_neural_decision(active_order, current_close, features, current_action="HOLD", current_prob=0.5):
     """
-    Вычисляет чисто нейросетевое решение на досрочный выход из сделки (БЕЗ скриптовых `if` правил).
-    Принимает текущую позицию, цену закрытия и 12 рыночных фичей.
-    Возвращает dict с `should_exit` (bool), `exit_prob` (float) и `reason` (str).
+    Вычисляет чисто нейросетевое решение на досрочный выход из сделки по свободному усмотрению Нейросети.
+    Принимает текущую позицию, цену закрытия и векторы рыночных фичей.
     """
     global ai_exit_model
     if not active_order or ai_exit_model is None:
@@ -444,14 +462,17 @@ def evaluate_ai_exit_neural_decision(active_order, current_close, features):
         else:
             base_feats = base_feats[:12]
 
-        full_exit_features = np.append(base_feats, [pnl_pct, order_age_norm])
+        full_exit_features = np.append(base_feats, [pnl_pct, order_age_norm]).reshape(1, -1)
         
-        # 🤖 ИИ-НЕЙРОСЕТЕВОЙ ИНФЕРЕНС
-        exit_prob = float(ai_exit_model.predict(full_exit_features))
+        # 🤖 ЧИСТО НЕЙРОСЕТЕВОЙ ИНФЕРЕНС ВЫХОДА ИИ
+        try:
+            exit_prob = float(ai_exit_model.predict(full_exit_features)[0])
+        except Exception:
+            exit_prob = float(ai_exit_model.predict(full_exit_features))
 
-        # Нейросеть выносит решение на выход при уверенности ИИ > 0.70 и возрасте сделки > 30 сек
-        should_exit = (exit_prob >= 0.70) and (order_age_min >= 0.5)
-        reason = f"Нейросеть выходов (уверенность ИИ в закрытии: {exit_prob*100:.1f}%)"
+        # Нейросеть самостоятельно выносит решение о закрытии при достижении порога уверенности >= 65%
+        should_exit = bool(exit_prob >= 0.65)
+        reason = f"Нейросеть приняла решение о закрытии ордера (Уверенность ИИ: {exit_prob*100:.1f}%)"
 
         return {
             "should_exit": should_exit,
@@ -461,6 +482,45 @@ def evaluate_ai_exit_neural_decision(active_order, current_close, features):
     except Exception as e:
         logger.error(f"Error in evaluate_ai_exit_neural_decision: {e}")
         return {"should_exit": False, "exit_prob": 0.0, "reason": str(e)}
+    except Exception as e:
+        logger.error(f"Error in evaluate_ai_exit_neural_decision: {e}")
+        return {"should_exit": False, "exit_prob": 0.0, "reason": str(e)}
+
+def train_online_on_order_close(active_order, close_price, final_pnl, features):
+    """
+    Дообучает (Incremental Fine-Tuning) нейросеть выходов и классификатор ИИ
+    на результатах закрывшейся сделки в режиме реального времени!
+    """
+    global ai_exit_model, classifier_model
+    try:
+        if not active_order or ai_exit_model is None:
+            return
+            
+        entry_price = float(active_order.get("entry_price", close_price))
+        side = str(active_order.get("side", "BUY")).upper()
+        
+        # Размечаем целевую метку для дообучения (1 - успешная закрытая сделка, 0 - безубыток/убыток)
+        target_label = 1.0 if final_pnl > 0 else 0.0
+
+        pnl_pct = (close_price - entry_price) / (entry_price + 1e-10) if side == "BUY" else (entry_price - close_price) / (entry_price + 1e-10)
+        
+        base_feats = np.array(features).flatten()
+        if len(base_feats) < 12:
+            base_feats = np.pad(base_feats, (0, 12 - len(base_feats)), 'constant')
+        else:
+            base_feats = base_feats[:12]
+            
+        full_exit_features = np.append(base_feats, [pnl_pct, 0.5]).reshape(1, -1)
+        
+        # Выполняем инкрементальный шаг дообучения
+        if hasattr(ai_exit_model, "partial_fit"):
+            ai_exit_model.partial_fit(full_exit_features, np.array([target_label]))
+        elif hasattr(ai_exit_model, "fit"):
+            ai_exit_model.fit(full_exit_features, np.array([target_label]))
+            
+        logger.info(f"🧠 [AI NEURAL ONLINE TRAIN] Нейросеть выходов дообучена на сделке (PnL: ${final_pnl:+.2f}).")
+    except Exception as ex:
+        logger.error(f"Error in train_online_on_order_close: {ex}")
 
 import pickle
 import os
@@ -491,17 +551,30 @@ def save_models_to_disk(pair, timeframe):
 
         # Get virtual stats from memory or existing file
         v_stat = last_virtual_stats.get((pair.upper(), timeframe))
-        if not v_stat and os.path.exists(filepath):
+        if (not v_stat or v_stat.get("total", 0) == 0) and os.path.exists(filepath):
             try:
                 with open(filepath, "rb") as f_prev:
                     d_prev = pickle.load(f_prev)
-                    v_stat = d_prev.get("virtual_stats")
+                    if isinstance(d_prev, dict) and d_prev.get("virtual_stats") and d_prev["virtual_stats"].get("total", 0) > 0:
+                        v_stat = d_prev.get("virtual_stats")
+                        last_virtual_stats[(pair.upper(), timeframe)] = v_stat
             except Exception:
                 pass
         if not v_stat:
             v_stat = {"total": 0, "wins": 0, "losses": 0, "winrate": 0.0}
 
-        val_stat = last_val_stats.get((pair.upper(), timeframe), {"total": 0, "wins": 0, "losses": 0, "winrate": 0.0, "pnl_pct": 0.0})
+        val_stat = last_val_stats.get((pair.upper(), timeframe))
+        if (not val_stat or val_stat.get("total", 0) == 0) and os.path.exists(filepath):
+            try:
+                with open(filepath, "rb") as f_prev:
+                    d_prev = pickle.load(f_prev)
+                    if isinstance(d_prev, dict) and d_prev.get("val_stats") and d_prev["val_stats"].get("total", 0) > 0:
+                        val_stat = d_prev.get("val_stats")
+                        last_val_stats[(pair.upper(), timeframe)] = val_stat
+            except Exception:
+                pass
+        if not val_stat:
+            val_stat = {"total": 0, "wins": 0, "losses": 0, "winrate": 0.0, "pnl_pct": 0.0}
 
         # Calculate real/demo trades stats from orders database for this pair
         real_closed = [o for o in orders if o.get("status") not in ["ACTIVE", "PENDING"]]
@@ -594,6 +667,11 @@ def load_models_from_disk(pair, timeframe):
         classifier_model = data["classifier"]
         ai_trailing_model = data["trailing"]
         
+        if "virtual_stats" in data and data["virtual_stats"]:
+            last_virtual_stats[(pair.upper(), timeframe)] = data["virtual_stats"]
+        if "val_stats" in data and data["val_stats"]:
+            last_val_stats[(pair.upper(), timeframe)] = data["val_stats"]
+
         current_model_pair = pair.upper()
         current_model_timeframe = timeframe
         
@@ -2064,8 +2142,42 @@ def _bootstrap_virtual_training_inner(pair, timeframe):
         thresh = 0.65
 
     best_classifier = None
-    best_v_stats = {"total": 0, "wins": 0, "losses": 0, "winrate": 0.0, "threshold": thresh}
-    val_stat = {"total": 0, "wins": 0, "losses": 0, "winrate": 0.0, "pnl_pct": 0.0, "threshold": thresh}
+    
+    # Подтягиваем сохранённую статистику виртуальных сделок, чтобы не сбрасывать её при дообучении!
+    existing_v_stat = last_virtual_stats.get((pair.upper(), timeframe))
+    if not existing_v_stat:
+        filepath = f"models/{pair.upper()}_{timeframe}.pkl"
+        if os.path.exists(filepath):
+            try:
+                with open(filepath, "rb") as f_prev:
+                    d_prev = pickle.load(f_prev)
+                    if isinstance(d_prev, dict) and d_prev.get("virtual_stats"):
+                        existing_v_stat = d_prev.get("virtual_stats")
+            except Exception:
+                pass
+
+    if existing_v_stat and existing_v_stat.get("total", 0) > 0:
+        best_v_stats = existing_v_stat
+    else:
+        best_v_stats = {"total": 0, "wins": 0, "losses": 0, "winrate": 0.0, "threshold": thresh}
+
+    # Подтягиваем сохранённую тестовую статистику (VAL 20%), чтобы не сбрасывать её при дообучении!
+    existing_val_stat = last_val_stats.get((pair.upper(), timeframe))
+    if not existing_val_stat:
+        filepath = f"models/{pair.upper()}_{timeframe}.pkl"
+        if os.path.exists(filepath):
+            try:
+                with open(filepath, "rb") as f_prev:
+                    d_prev = pickle.load(f_prev)
+                    if isinstance(d_prev, dict) and d_prev.get("val_stats"):
+                        existing_val_stat = d_prev.get("val_stats")
+            except Exception:
+                pass
+
+    if existing_val_stat and existing_val_stat.get("total", 0) > 0:
+        val_stat = existing_val_stat
+    else:
+        val_stat = {"total": 0, "wins": 0, "losses": 0, "winrate": 0.0, "pnl_pct": 0.0, "threshold": thresh}
 
     if HAS_LIGHTGBM:
         import lightgbm as lgb

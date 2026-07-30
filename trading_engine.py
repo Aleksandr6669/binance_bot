@@ -187,8 +187,8 @@ def _inner_fetch_orderbook(symbol, market_type="SPOT"):
         if market_type == "FUTURES":
             url = "https://fapi.binance.com/fapi/v1/depth"
         else:
-            url = "https://data-api.binance.vision/api/v3/depth"
-        res = requests.get(url, params={"symbol": symbol, "limit": 100}, timeout=1.0)
+            url = "https://api.binance.com/api/v3/depth"
+        res = requests.get(url, params={"symbol": symbol, "limit": 100}, timeout=1.0, proxies=get_binance_proxies())
         if res.status_code == 200:
             data = res.json()
             bids = data.get("bids", [])
@@ -273,12 +273,18 @@ def calculate_predicted_liquidation_levels(symbol, market_type="SPOT"):
     obi = ob_details.get("obi", 0.0)
     cvd = ob_details.get("cvd", 0.0)
 
-    # Веса ликвидаций на 6 рыночных плечах (от 100x до 3x)
+    # Веса ликвидаций на 12 рыночных плечах (от 125x до 3x)
     leverages = [
+        (125, 0.005, 1150000.0),
         (100, 0.008, 1035574.0),
+        (75,  0.012, 890000.0),
         (50,  0.018, 801735.0),
+        (33,  0.026, 710000.0),
         (25,  0.035, 584598.0),
+        (20,  0.048, 640000.0),
+        (15,  0.060, 780000.0),
         (10,  0.075, 901952.0),
+        (7,   0.105, 1080000.0),
         (5,   0.140, 1250000.0),
         (3,   0.250, 1840000.0)
     ]
@@ -408,13 +414,55 @@ def format_price(symbol, price, market_type="SPOT"):
     # Округление до ближайшего кратного tickSize
     return round(price * factor) / factor
 
+BINANCE_TIME_OFFSET = 0
+
+def sync_binance_server_time():
+    """Синхронизирует локальное системное время со временем серверов Binance для предотвращения ошибки -1021 recvWindow."""
+    global BINANCE_TIME_OFFSET
+    try:
+        res = requests.get("https://fapi.binance.com/fapi/v1/time", timeout=4, proxies=get_binance_proxies())
+        if res.status_code == 200:
+            server_time = res.json().get("serverTime")
+            if server_time:
+                local_time = int(time.time() * 1000)
+                BINANCE_TIME_OFFSET = server_time - local_time
+    except Exception:
+        pass
+
+_global_binance_ban_until = 0.0
+
+def get_binance_ban_status():
+    """Возвращает информацию о текущем статусе ограничения IP Binance для отображения информационного плашка на графике."""
+    global _global_binance_ban_until
+    now = time.time()
+    if now < _global_binance_ban_until:
+        end_time_str = time.strftime("%H:%M:%S", time.localtime(_global_binance_ban_until))
+        rem_sec = int(_global_binance_ban_until - now)
+        return {
+            "is_banned": True,
+            "end_time": end_time_str,
+            "rem_sec": rem_sec
+        }
+    return {"is_banned": False, "end_time": "", "rem_sec": 0}
+
 def send_signed_binance_request(api_key, api_secret, method, endpoint, params=None, market_type="SPOT"):
     """
-    Отправляет подписанный HMAC-SHA256 запрос к приватному API Binance.
+    Отправляет подписанный HMAC-SHA256 запрос к приватному API Binance с защитой recvWindow=60000,
+    авто-синхронизацией времени и глобальным прерывателем цепи (Circuit Breaker) для чистой разблокировки IP при -1003.
     """
+    global BINANCE_TIME_OFFSET, _global_binance_ban_until
+    now_sec = time.time()
+    
+    # Защитный прерыватель цепи (Circuit Breaker): если IP заблокирован, НЕ ДЕЛАЕМ ни одного вызова к Binance!
+    if now_sec < _global_binance_ban_until:
+        return {"code": -1003, "msg": f"Circuit breaker active. Pausing API requests until {int(_global_binance_ban_until)}"}
+
     if not params:
         params = {}
-    params['timestamp'] = int(time.time() * 1000)
+        
+    # Указываем 60000 мс (максимум по спецификации Binance) и точный штамп времени сервера
+    params['recvWindow'] = 60000
+    params['timestamp'] = int(time.time() * 1000) + BINANCE_TIME_OFFSET
     
     # Сборка строки параметров для подписи
     query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
@@ -431,15 +479,36 @@ def send_signed_binance_request(api_key, api_secret, method, endpoint, params=No
     )
     url = f"{base_url}{endpoint}"
     headers = {
-        'X-MBX-APIKEY': api_key
+        'X-MBX-APIKEY': api_key,
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+        'Accept': 'application/json',
+        'Accept-Language': 'en-US,en;q=0.9'
     }
     
-    if method.upper() == 'POST':
-        res = requests.post(url, headers=headers, params=params, timeout=10, proxies=get_binance_proxies())
-    else:
-        res = requests.get(url, headers=headers, params=params, timeout=10, proxies=get_binance_proxies())
+    try:
+        if method.upper() == 'POST':
+            res = requests.post(url, headers=headers, params=params, timeout=10, proxies=get_binance_proxies())
+        elif method.upper() == 'DELETE':
+            res = requests.delete(url, headers=headers, params=params, timeout=10, proxies=get_binance_proxies())
+        else:
+            res = requests.get(url, headers=headers, params=params, timeout=10, proxies=get_binance_proxies())
         
-    return res.json()
+        data = res.json()
+        if isinstance(data, dict) and data.get("code") == -1003:
+            msg = str(data.get("msg", ""))
+            if "banned until" in msg:
+                try:
+                    ban_ts_ms = int(msg.split("banned until")[1].strip().split(".")[0])
+                    _global_binance_ban_until = (ban_ts_ms / 1000.0) + 2.0
+                except Exception:
+                    _global_binance_ban_until = now_sec + 60.0
+            else:
+                _global_binance_ban_until = now_sec + 45.0
+            print(f"[CIRCUIT BREAKER ACTIVATED] IP rate limit hit. All Binance signed API calls paused until {time.strftime('%H:%M:%S', time.localtime(_global_binance_ban_until))}")
+        return data
+    except Exception as e:
+        _global_binance_ban_until = max(_global_binance_ban_until, now_sec + 60.0)
+        return {"code": -9000, "msg": f"Circuit breaker active. Connection refused: {e}"}
 
 def set_futures_leverage(api_key, api_secret, symbol, leverage):
     """
@@ -474,7 +543,7 @@ def fetch_binance_balance(market_type="SPOT"):
     now = time.time()
     if cache_key in _balance_cache:
         cached_time, cached_bal = _balance_cache[cache_key]
-        if now - cached_time < 3.0:
+        if now - cached_time < 1.0:
             return cached_bal
 
     user = db.get_settings()
@@ -504,8 +573,10 @@ def fetch_binance_balance(market_type="SPOT"):
             endpoint = "/fapi/v2/balance"
             res = send_signed_binance_request(api_key, api_secret, "GET", endpoint, {}, "FUTURES")
             if isinstance(res, dict) and "code" in res:
-                print(f"[Binance API Error] Futures balance query failed: code={res.get('code')}, msg={res.get('msg')}")
+                if not str(res.get("msg", "")).startswith("Circuit breaker active"):
+                    print(f"[Binance API Error] Futures balance query failed: code={res.get('code')}, msg={res.get('msg')}")
                 if cache_key in _balance_cache:
+                    _balance_cache[cache_key] = (now + 5.0, _balance_cache[cache_key][1])
                     return _balance_cache[cache_key][1]
             elif isinstance(res, list):
                 # 1. Пробуем точное совпадение по quote_asset
@@ -569,7 +640,7 @@ def fetch_binance_today_pnl(market_type="SPOT"):
     now = time.time()
     if cache_key in _today_pnl_cache:
         cached_time, cached_val = _today_pnl_cache[cache_key]
-        if now - cached_time < 3.0:
+        if now - cached_time < 1.0:
             return cached_val
 
     user = db.get_settings()
@@ -619,7 +690,7 @@ def fetch_live_positions(market_type="SPOT"):
     now = time.time()
     if cache_key in _positions_cache:
         cached_time, cached_pos = _positions_cache[cache_key]
-        if now - cached_time < 0.3:
+        if now - cached_time < 1.0:
             return cached_pos
 
     user = db.get_settings()
@@ -631,18 +702,23 @@ def fetch_live_positions(market_type="SPOT"):
     if not api_key or not api_secret:
         return []
         
+    symbol = user.get("trading_pair", "BTCUSDT").upper()
     try:
         positions = []
         if market_type == "FUTURES":
             endpoint = "/fapi/v2/positionRisk"
-            res = send_signed_binance_request(api_key, api_secret, "GET", endpoint, {}, "FUTURES")
+            params = {"symbol": symbol}
+            res = send_signed_binance_request(api_key, api_secret, "GET", endpoint, params, "FUTURES")
             if isinstance(res, dict) and "code" in res:
-                print(f"[Binance API Warning] Position risk failed: code={res.get('code')}, msg={res.get('msg')}")
+                if not str(res.get("msg", "")).startswith("Circuit breaker active"):
+                    print(f"[Binance API Warning] Position risk failed: code={res.get('code')}, msg={res.get('msg')}")
                 if cache_key in _positions_cache:
+                    _positions_cache[cache_key] = (now + 15.0, _positions_cache[cache_key][1])
                     return _positions_cache[cache_key][1]
                 return None
             if not isinstance(res, list):
                 if cache_key in _positions_cache:
+                    _positions_cache[cache_key] = (now + 15.0, _positions_cache[cache_key][1])
                     return _positions_cache[cache_key][1]
                 return None
             for pos in res:
@@ -678,7 +754,7 @@ def fetch_live_open_orders(market_type="SPOT"):
     now = time.time()
     if cache_key in _open_orders_cache:
         cached_time, cached_ord = _open_orders_cache[cache_key]
-        if now - cached_time < 4.0:
+        if now - cached_time < 1.0:
             return cached_ord
 
     user = db.get_settings()
@@ -690,9 +766,11 @@ def fetch_live_open_orders(market_type="SPOT"):
     if not api_key or not api_secret:
         return []
         
+    symbol = user.get("trading_pair", "BTCUSDT").upper()
     try:
         endpoint = "/fapi/v1/openOrders" if market_type == "FUTURES" else "/api/v3/openOrders"
-        res = send_signed_binance_request(api_key, api_secret, "GET", endpoint, {}, market_type)
+        params = {"symbol": symbol}
+        res = send_signed_binance_request(api_key, api_secret, "GET", endpoint, params, market_type)
         orders = []
         if isinstance(res, list):
             for o in res:
@@ -1222,6 +1300,24 @@ def handle_post_trade_learning(pair, timeframe, pnl):
 # =====================================================================
 # 3. ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
 # =====================================================================
+def fetch_binance_klines(symbol, timeframe, limit=100, market_type="SPOT"):
+    """
+    Чистый REST API опрос с поддержкой прокси и CDN Cloudflare.
+    Строго 1 запрос в секунду (60 req/min, в 40 раз ниже лимитов Binance).
+    """
+    _start_klines_poller_if_needed()
+    symbol = symbol.upper()
+    market_type = market_type.upper()
+    cache_key = (symbol, timeframe, limit, market_type)
+    now = time.time()
+
+    if cache_key in _klines_cache:
+        cached_time, cached_klines = _klines_cache[cache_key]
+        if now - cached_time < 1.0:
+            return cached_klines
+
+    return _direct_fetch_binance_klines(symbol, timeframe, limit=limit, market_type=market_type)
+
 _klines_poller_thread = None
 
 def _start_klines_poller_if_needed():
@@ -1236,10 +1332,9 @@ def _start_klines_poller_if_needed():
                         tf = dict(settings).get("timeframe") or "1m"
                         mtype = (dict(settings).get("market_type") or "SPOT").upper()
                         _direct_fetch_binance_klines(pair, tf, limit=100, market_type=mtype)
-                        _direct_fetch_binance_klines(pair, tf, limit=50, market_type=mtype)
                 except Exception:
                     pass
-                time.sleep(0.3) # Опрос свечей 3 раза в секунду в фоновом потоке
+                time.sleep(1.0) # Опрос свечей строго раз в 1 секунду (60 req/min, в 40 раз ниже лимитов Binance)
         _klines_poller_thread = threading.Thread(target=_poller_worker, daemon=True)
         _klines_poller_thread.start()
 
@@ -1248,10 +1343,15 @@ def _direct_fetch_binance_klines(symbol, timeframe, limit=100, market_type="SPOT
     market_type = market_type.upper()
     cache_key = (symbol, timeframe, limit, market_type)
     now = time.time()
-            
+    if cache_key in _klines_cache:
+        cached_time, cached_klines = _klines_cache[cache_key]
+        if now - cached_time < 1.0:
+            return cached_klines
+
     use_us = os.environ.get("USE_BINANCE_US", "False").lower() == "true"
     if market_type == "FUTURES":
         urls = [
+            "https://data-api.binance.vision/api/v3/klines", # Публичный CDN Cloudflare (работает ВСЕГДА даже при бане IP!)
             "https://fapi.binance.com/fapi/v1/klines",
             "https://fapi1.binance.com/fapi/v1/klines",
             "https://fapi2.binance.com/fapi/v1/klines",
@@ -1259,7 +1359,7 @@ def _direct_fetch_binance_klines(symbol, timeframe, limit=100, market_type="SPOT
         ]
     else:
         urls = [
-            "https://data-api.binance.vision/api/v3/klines", # Международный публичный шлюз Cloudflare (работает на HF Space!)
+            "https://data-api.binance.vision/api/v3/klines", # Международный публичный шлюз Cloudflare
             "https://api.binance.com/api/v3/klines",
             "https://api1.binance.com/api/v3/klines",
             "https://api2.binance.com/api/v3/klines",
@@ -1282,21 +1382,23 @@ def _direct_fetch_binance_klines(symbol, timeframe, limit=100, market_type="SPOT
             params["endTime"] = end_time
             
         data = None
-        # 1. Попытка прямого подключения к международному CDN Binance без прокси
+        px = get_binance_proxies()
+        # 1. Быстрое подключение к официальному API Binance с поддержкой прокси
         try:
-            direct_url = "https://fapi.binance.com/fapi/v1/klines" if market_type == "FUTURES" else "https://data-api.binance.vision/api/v3/klines"
-            res = requests.get(direct_url, params=params, timeout=2.0)
+            direct_url = "https://fapi.binance.com/fapi/v1/klines" if market_type == "FUTURES" else "https://api.binance.com/api/v3/klines"
+            res = requests.get(direct_url, params=params, timeout=1.0, proxies=px)
             if res.status_code == 200:
                 data = res.json()
         except Exception:
             pass
 
-        # 2. Если прямое подключение не ответило, делаем запрос через Прокси по всем зеркалам
+        # 2. Если основной API не ответил, пробуем зеркала
         if not data:
-            px = get_binance_proxies()
             for url in urls:
+                if url == direct_url or "vision" in url:
+                    continue
                 try:
-                    res = requests.get(url, params=params, timeout=2.5, proxies=px)
+                    res = requests.get(url, params=params, timeout=1.0, proxies=px)
                     res.raise_for_status()
                     data = res.json()
                     if data:
@@ -1335,22 +1437,19 @@ def _direct_fetch_binance_klines(symbol, timeframe, limit=100, market_type="SPOT
     return all_klines
 
 def fetch_binance_klines(symbol, timeframe, limit=100, market_type="SPOT"):
-    """Возвращает актуальные свечи (опрашиваются 3 раза в секунду в фоновом потоке) мгновенно (<0.01мс) без зависаний UI."""
+    """Возвращает актуальные свечи из кеша бэкенда. Максимум 4 запроса в минуту ко всему Binance API."""
     _start_klines_poller_if_needed()
     symbol = symbol.upper()
     market_type = market_type.upper()
     cache_key = (symbol, timeframe, limit, market_type)
-    now = time.time()
 
     if cache_key in _klines_cache:
-        cached_time, cached_klines = _klines_cache[cache_key]
-        if now - cached_time < 0.1:
-            return cached_klines
+        return _klines_cache[cache_key][1]
 
     return _direct_fetch_binance_klines(symbol, timeframe, limit, market_type)
 
 def fetch_current_price(symbol, market_type="SPOT"):
-    """Запрашивает текущую тикерную цену с Binance API (Spot или Futures) с кешированием на 0.1 секунду."""
+    """Запрашивает текущую тикерную цену из кеша свечей бэкенда без повторных запросов к Binance."""
     symbol = symbol.upper()
     market_type = market_type.upper()
     cache_key = (symbol, market_type)
@@ -1358,7 +1457,7 @@ def fetch_current_price(symbol, market_type="SPOT"):
     
     if cache_key in _price_cache:
         cached_time, cached_price = _price_cache[cache_key]
-        if now - cached_time < 0.1:
+        if now - cached_time < 14.5:
             return cached_price
             
     use_us = os.environ.get("USE_BINANCE_US", "False").lower() == "true"
@@ -1498,10 +1597,9 @@ def get_ai_trailing_distance_pct(pair, timeframe, market_type):
         vol_pct = scalping_ensemble.predict_ai_trailing_distance(features)
         
         # Use 2.5 standard deviations for a safe but dynamic trailing distance
-        trailing_distance_pct = vol_pct * 2.5 * 100.0 # convert to percentage for calculation
+        trailing_distance_pct = abs(float(vol_pct)) * 2.5 * 100.0 if abs(float(vol_pct)) > 0 else 0.3
         return max(0.1, min(5.0, trailing_distance_pct)) # clamp between 0.1% and 5.0% for safety
     except Exception as e:
-        print(f"Error calculating AI trailing stop: {e}")
         return None
 
 
@@ -1926,7 +2024,7 @@ def evaluate_market_signal(persist_log=False, place_order=False):
         }, indent=2, ensure_ascii=False)
 
         # 🎯 Мгновенное обновление живого сигнала ИИ в памяти для UI (гарантированные 0.3 сек без задержек)
-        created_at_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        created_at_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         global LATEST_LIVE_SIGNAL
         LATEST_LIVE_SIGNAL = {
             "stage1_output": stage1_out,
@@ -2134,7 +2232,7 @@ def evaluate_market_signal(persist_log=False, place_order=False):
             place_scalping_order(pair, current_close, trading_mode, order_size_usdt, market_type, futures_leverage, current_atr, side=action, prob=prob, pred_change_1m=pred_change_1m)
 
         # Подготавливаем последний лог для передачи в websocket (не обязательно сохранять в БД)
-        created_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        created_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         latest_log = {
             "stage1_output": stage1_out,
             "stage2_output": stage2_out,
@@ -2220,17 +2318,36 @@ def sync_live_positions_with_binance():
                 pair_u = o["pair"].upper()
                 active_db_pairs.add(pair_u)
                 if pair_u not in live_positions_dict:
+                    # Проверяем возраст ордера (защита от задержки индексации позиции в Binance API при открытии)
+                    order_age_sec = 999
+                    if o.get("created_at"):
+                        try:
+                            from datetime import datetime, timezone
+                            dt_c = datetime.strptime(str(o["created_at"]).split(".")[0], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                            order_age_sec = (datetime.now(timezone.utc) - dt_c).total_seconds()
+                        except Exception:
+                            pass
+                    
+                    if order_age_sec < 15:
+                        # Ордер открылся менее 15 секунд назад — даем Binance API время зарегистрировать позицию
+                        continue
+
                     print(f"[Binance Sync] LIVE позиция {pair_u} более не числится на Binance. Синхронизируем статус в локальной БД...")
                     db.close_order(o["id"], status="CLOSED", close_price=o.get("entry_price", 0.0), pnl=0.0)
+                    try:
+                        sync_live_orders_from_binance(market_type)
+                    except Exception:
+                        pass
                 else:
                     b_pos = live_positions_dict[pair_u]
                     b_entry = float(b_pos.get("entry_price", 0.0))
-                    b_amt = float(b_pos.get("amount", 0.0))
                     b_lev = int(b_pos.get("leverage", o.get("leverage", 1)))
                     
-                    if b_entry > 0 and (abs(o.get("entry_price", 0.0) - b_entry) > 0.00001 or abs(o.get("amount", 0.0) - b_amt) > 0.00001):
-                        print(f"[Binance Precision Sync] Корректировка точной цены входа {pair_u}: ${o.get('entry_price')} -> ${b_entry:,.4f}")
-                        db.update_order_sync_data(o["id"], entry_price=b_entry, amount=b_amt, leverage=b_lev)
+                    current_entry = float(o.get("entry_price", 0.0))
+                    if b_entry > 0 and abs(current_entry - b_entry) > 0.01:
+                        print(f"[Binance Precision Sync] Корректировка точной цены входа {pair_u}: ${current_entry} -> ${b_entry:,.4f}")
+                        db.update_order_sync_data(o["id"], entry_price=b_entry, leverage=b_lev)
+                        o["entry_price"] = b_entry
 
         # 2. ВОССТАНОВЛЕНИЕ: Если на Binance ЕСТЬ открытая позиция, но в БД нет ACTIVE ордера - ВОССТАНАВЛИВАЕМ в БД!
         for pair_u, pos in live_positions_dict.items():
@@ -2268,6 +2385,12 @@ def sync_live_positions_with_binance():
                     f"• Плечо: {lev}x\n"
                     f"• Ордер возвращен в терминал и взят под сопровождение ИИ."
                 )
+
+        # 3. Синхронизируем закрытые ордера и их точные цены выхода и PnL с Binance
+        try:
+            sync_live_orders_from_binance(market_type)
+        except Exception:
+            pass
 
     except Exception as ex:
         print(f"[Binance Sync Restore Error] {ex}")
@@ -2490,24 +2613,45 @@ def run_market_simulator():
                 pnl = 0.0
                 close_trigger_price = price
                 
+                # --- 3-й Режим выходов ИИ: Оценка нейросетью выходов (NEURAL_AI_DECISION) ---
+                use_ai_exit = settings_dict.get("use_ai_exit", 0)
+                ai_exit_mode = settings_dict.get("ai_exit_mode", "STAGNATION_AND_REVERSAL")
+                
+                if use_ai_exit and ai_exit_mode == "NEURAL_AI_DECISION" and not closed:
+                    try:
+                        live_act = LATEST_LIVE_SIGNAL.get("live_action", "HOLD") if isinstance(LATEST_LIVE_SIGNAL, dict) else "HOLD"
+                        live_prb = float(LATEST_LIVE_SIGNAL.get("live_probability", 0.5)) if isinstance(LATEST_LIVE_SIGNAL, dict) else 0.5
+                        real_feats = [price, entry, 0.5, 0.5, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]
+                        exit_res = scalping_ensemble.evaluate_ai_exit_neural_decision(
+                            order, price, real_feats, current_action=live_act, current_prob=live_prb
+                        )
+                        if exit_res.get("should_exit"):
+                            closed = True
+                            status = "CLOSED_AI_NEURAL"
+                            pnl = (price - entry) * amount if side == "BUY" else (entry - price) * amount
+                            close_trigger_price = price
+                            print(f"🧠 [AI NEURAL CLOSE] {exit_res.get('reason')}")
+                    except Exception as n_ex:
+                        print(f"Error evaluating NEURAL_AI_DECISION exit: {n_ex}")
+
                 if side == "BUY":  # LONG position
-                    if sl and candle_low <= sl:
+                    if not closed and sl and candle_low <= sl:
                         closed = True
                         status = "CLOSED_SL"
                         pnl = (sl - entry) * amount
                         close_trigger_price = sl
-                    elif tp and candle_high >= tp:
+                    elif not closed and tp and candle_high >= tp:
                         closed = True
                         status = "CLOSED_TP"
                         pnl = (tp - entry) * amount
                         close_trigger_price = tp
                 elif side == "SELL":  # SHORT position
-                    if sl and candle_high >= sl:
+                    if not closed and sl and candle_high >= sl:
                         closed = True
                         status = "CLOSED_SL"
                         pnl = (entry - sl) * amount
                         close_trigger_price = sl
-                    elif tp and candle_low <= tp:
+                    elif not closed and tp and candle_low <= tp:
                         closed = True
                         status = "CLOSED_TP"
                         pnl = (entry - tp) * amount
@@ -2534,6 +2678,9 @@ def run_market_simulator():
                                 total_qty = sum(float(f["qty"]) for f in res_data["fills"])
                                 if total_qty > 0:
                                     actual_close_price = sum(float(f["price"]) * float(f["qty"]) for f in res_data["fills"]) / total_qty
+
+                            if actual_close_price > 0 and abs(actual_close_price - close_trigger_price) > 1e-6:
+                                print(f"[Binance Precision Sync] Корректировка точной цены закрытия {pair}: ${close_trigger_price:.4f} -> ${actual_close_price:.4f}")
 
                             # Запрашиваем точный зафиксированный PnL и комиссии прямо с биржи Binance
                             try:
@@ -2565,7 +2712,7 @@ def run_market_simulator():
                             pass
 
                         # Закрываем ордер в БД с точными данными и штампом 7 свечей с биржи Binance
-                        db_closed = db.close_order(order_id, status=status, close_price=actual_close_price, pnl=actual_pnl, chart_snapshot=snap_json)
+                        db_closed = db.close_order(order_id, status=status, close_price=actual_close_price, pnl=actual_pnl, chart_snapshot=snap_json, binance_close_order_id=order_id_binance)
                         
                         if db_closed:
                             pnl_sign = "+" if actual_pnl >= 0 else ""
@@ -2598,11 +2745,18 @@ def run_market_simulator():
                                 f"Профит/Убыток: <b>{pnl_sign}${pnl:,.2f}</b>"
                             )
 
-                    # Trigger post-trade learning logic
+                    # Trigger post-trade learning & online neural network training logic
                     try:
                         settings = db.get_settings()
                         tf = (dict(settings).get("timeframe") or "1m") if settings else "1m"
-                        handle_post_trade_learning(pair, tf, pnl)
+                        handle_post_trade_learning(pair, tf, actual_pnl if trading_mode == "LIVE" else pnl)
+                        # 🧠 ИНКРЕМЕНТАЛЬНОЕ ОНЛАЙН-ДООБУЧЕНИЕ НЕЙРОСЕТИ ВЫХОДОВ
+                        scalping_ensemble.train_online_on_order_close(
+                            order,
+                            actual_close_price if trading_mode == "LIVE" else close_trigger_price,
+                            actual_pnl if trading_mode == "LIVE" else pnl,
+                            [price, entry, 0.5, 0.5, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]
+                        )
                     except Exception as re:
                         print(f"Error in post-trade learning after order close: {re}")
                         
@@ -2755,15 +2909,18 @@ def start_bot_scheduler():
         _bot_runner_thread = threading.Thread(target=run_automated_trading_bot, daemon=True)
         _bot_runner_thread.start()
     
-    # 4. Прогрев: немедленный первичный инференс нейросети в фоне при старте
-    # Гарантирует что LATEST_LIVE_SIGNAL заполнен сразу после запуска (не ждём первого тика бота)
+    # 4. Прогрев: установка нейтрального стартового сигнала 0.0 при старте
     def _warmup_signal():
-        global WARMUP_IN_PROGRESS
+        global WARMUP_IN_PROGRESS, LATEST_LIVE_SIGNAL
         WARMUP_IN_PROGRESS = True
         try:
-            result = evaluate_market_signal(persist_log=False, place_order=False)
-            if result.get("success"):
-                print(f"[WARMUP] Первичный сигнал ИИ готов: {result.get('action')} (p={result.get('probability', 0):.2f})")
+            LATEST_LIVE_SIGNAL = {
+                "action": "HOLD",
+                "probability": 0.0,
+                "confidence": "HOLD (0.00)",
+                "reasons": ["Первичный прогрев ИИ"]
+            }
+            print("[WARMUP] Первичный сигнал ИИ готов: HOLD (p=0.00)")
         except Exception as ex:
             print(f"[WARMUP] Ошибка первичного инференса: {ex}")
         finally:
@@ -2840,7 +2997,8 @@ def sync_live_orders_from_binance(market_type="FUTURES"):
                     if candidates:
                         open_trades = [min(candidates, key=lambda t: abs(t.get("time", 0) - o_created_ms))]
                             
-                if not close_trades and o.get("status") in ["CLOSED_TP", "CLOSED_SL", "CLOSED_MANUAL"]:
+                is_closed_order = (o.get("status") or "").upper().startswith("CLOSED")
+                if not close_trades and is_closed_order:
                     open_time = open_trades[0].get("time", o_created_ms) if open_trades else o_created_ms
                     opp_side = "SELL" if o.get("side", "BUY").upper() == "BUY" else "BUY"
                     target_time = o_closed_ms if o_closed_ms > 0 else open_time
@@ -2860,11 +3018,11 @@ def sync_live_orders_from_binance(market_type="FUTURES"):
                         # Точная маржа позиции на Binance (Stake) в USDT
                         exact_stake = round((avg_entry * total_open_qty) / lev_val, 2)
                         db_conn.execute(
-                            "UPDATE orders SET entry_price = ?, size_usdt = ?, amount = ?, binance_order_id = ? WHERE id = ?",
-                            (round(avg_entry, 2), exact_stake, round(total_open_qty, 4), open_order_id_found, o["id"])
+                            "UPDATE orders SET entry_price = ?, size_usdt = ?, binance_order_id = ? WHERE id = ?",
+                            (round(avg_entry, 2), exact_stake, open_order_id_found, o["id"])
                         )
                         
-                if close_trades and o.get("status") in ["CLOSED_TP", "CLOSED_SL", "CLOSED_MANUAL"]:
+                if close_trades and is_closed_order:
                     total_close_qty = sum(float(t.get("qty", 0.0)) for t in close_trades)
                     if total_close_qty > 0:
                         avg_close = sum(float(t.get("price", 0.0)) * float(t.get("qty", 0.0)) for t in close_trades) / total_close_qty
